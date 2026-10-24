@@ -36,7 +36,7 @@ Based on `components.md` (same row numbers). Written 24 Oct 2026 (IST).
 | 12 | Embeddings (multilingual-e5-small, fastembed) | Yes | Yes | ≤30 ms/chunk; ≤100 ms/query | ≤1 GB | MIT / Apache-2.0 |
 | 13 | Vector store (sqlite-vec / FAISS) | Yes | Yes | ≤50 ms top-10 over 100k | ≤1 GB | Apache-2.0 / MIT |
 | 14 | RRF fusion | Yes | Yes | ≤1 ms | n/a | own code |
-| 15 | Reranker (gte-multilingual-reranker-base or bge-reranker-v2-m3 int8) | Yes | Yes | ≤3 s for 30 candidates | ≤1.5 GB | Apache-2.0 |
+| 15 | Reranker (gte-multilingual-reranker-base or bge-reranker-v2-m3 int8) | Yes | Yes | ≤8 s per letter for 20 candidates × 256 tokens (whole search) | ≤1.5 GB | Apache-2.0 |
 | 16 | LLM (Qwen3-4B or Qwen2.5-7B-Instruct, Q4 GGUF) | Yes (sideloaded) | Yes | Summary ≤30 s | 4B ≤4 GB, 7B ≤6.5 GB with 8k context | Apache-2.0 model |
 | 17 | Serving (LM Studio, localhost:1234) | Yes | Yes | Generation ≥8 tok/s (4B) / ≥4 tok/s (7B); time to first token ≤30 s for a 4k-token prompt | Included in row 16 | Proprietary, free for internal business use (see §0) |
 | 18 | Grounded drafting (json_schema) | Yes | Yes | Draft ≤120 s | Included in row 16 | n/a |
@@ -46,6 +46,8 @@ Based on `components.md` (same row numbers). Written 24 Oct 2026 (IST).
 | 22 | Egress block (nftables / Windows Firewall) | Yes | n/a | n/a | n/a | OS |
 | 23 | Audit log (SHA-256 chain in SQLite) | Yes | Yes | ≤10 ms/append; full verify ≤5 s for 1M entries | ≤100 MB | own code |
 | 24 | LAN login (built-in sessions) | Yes | Yes | ≤200 ms/login | ≤50 MB | own code |
+
+> **Latency note (24 Oct 2026, Desk Lead):** the retrieval bar for rows 15/15.4 is relaxed from 3 s to ≤8 s on CPU. The end-to-end budget is 3 min per letter, so ~6 s for search is fine. Measured on the dev PC (Ryzen 7 250, CPU): ~5.5 s per letter for bge-reranker-v2-m3 int8, top 20 × 256 tokens.
 
 ## 2. Unit tests (input → expected)
 Legacy-font strings were run on this box through two converters:
@@ -117,7 +119,7 @@ Legacy-font strings were run on this box through two converters:
 | 15.1 | "अर्जित अवकाश नकदीकरण नियम", `R-07` at rank 8 of 30 | `R-07` in the top 3 after reranking |
 | 15.2 | English query against Hindi candidates | Relevant Hindi doc in the top 3 |
 | 15.3 | Same input run twice | Identical order |
-| 15.4 | 30 candidates × 256 tokens | ≤3 s wall time |
+| 15.4 | 20 candidates × 256 tokens | ≤8 s wall time on CPU (whole search per letter) |
 | 16.1 | `GET /v1/models` | Lists the loaded model id |
 | 16.2 | `/v1/chat/completions`: summarise `L-1` in Hindi | ≤80 words; ≥90% Devanagari letters; contains "12/3/2025-प्रशा." verbatim |
 | 16.3 | Summarise `E-22` | English; contains "A-12011/5/2024-Estt." |

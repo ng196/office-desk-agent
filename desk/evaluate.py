@@ -25,8 +25,11 @@ def main(argv=None):
     cases = json.loads((LETTERS / "cases.json").read_text(encoding="utf-8"))
     emb.query("warm up")
     if __import__("os").environ.get("DESK_NO_RERANK") != "1":
+        import time as _t
         from . import rerank
-        rerank.get().scores("warm up", ["warm up"])
+        t0 = _t.perf_counter()
+        rerank.get()  # loaded once per process (module-level cache), not per letter
+        print(json.dumps({"reranker_load_s": round(_t.perf_counter() - t0, 2)}))
     rows, found, total, ver, lines, tps = [], 0, 0, 0, 0, []
     for c in cases:
         out = answer(con, emb, LETTERS / c["letter"], lang=c.get("lang", "en"), top=6, use_llm=use_llm)

@@ -78,3 +78,28 @@ def test_max_two_chunks_per_file(tmp_path, embedder):
     add_document(con, embedder, FIX / "E-22.txt", name="E-22")
     hits = search(con, embedder, "leave encashment", top=5)
     assert sum(h["file"] == "rules" for h in hits) == 2 and "E-22" in [h["file"] for h in hits]
+
+
+def test_statutory_cues_detected():
+    from desk.retrieve import statutory_cues
+    cues = [c.lower() for c in statutory_cues("Reply within thirty days under Section 7(1) of the Right to Information Act, 2005 and नियम 65")]
+    assert "thirty days" in cues and "section 7(1)" in cues and "information act" in cues and "नियम 65" in cues
+    assert statutory_cues("Please send my salary slip.") == []
+
+
+def test_cue_hits_join_rerank_pool(tmp_path, embedder):
+    """Exact-phrase cue hits are added to the pool (skipping ones already there); scores are not changed."""
+    from desk.store import connect, add_document
+    from desk.retrieve import search, cue_phrase_search
+    con = connect(tmp_path / "c.db")
+    pages = [(i, f"General office circular number {i} about attendance, files and records of the section.") for i in range(1, 30)]
+    pages.append((30, "The information shall be provided within thirty days of the receipt of the request."))
+    add_document(con, embedder, None, name="mix", pages=pages, min_page_chars=10)
+    letter = "Office files and records attendance circular. Reply within thirty days."
+    cid30 = con.execute("SELECT id FROM chunks WHERE page=30").fetchone()[0]
+    assert cue_phrase_search(con, letter) == [cid30]
+    assert cue_phrase_search(con, letter, exclude={cid30}) == []
+    assert cue_phrase_search(con, "Office files and records attendance circular.") == []
+    t = {}
+    hits = search(con, embedder, letter, top=30, candidates=1, max_per_file=30, rerank=False, timings=t)
+    assert 30 in [h["page"] for h in hits] and len(hits) == 1 + t["cue_candidates"]

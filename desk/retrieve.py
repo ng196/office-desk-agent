@@ -49,6 +49,50 @@ def keyword_search(con, text, n=50):
     return [r[0] for r in rows]
 
 
+# Statutory cues in a letter: section/rule/article numbers, "thirty days"/"30 days", "... Act", धारा/नियम.
+_CUES = [
+    re.compile(r"\b(?:section|sec\.|rule|article|clause|para)\s*\d+[a-z]?(?:\s*\(\d+\))?", re.I),
+    re.compile(r"\b(?:thirty|30|forty[- ]five|45|sixty|60|ninety|90)\s+days\b", re.I),
+    re.compile(r"\b(?:[A-Z][a-z]+\s+){1,5}Act\b"),
+    re.compile(r"(?:धारा|नियम)\s*[0-9०-९]+"),
+]
+
+
+def statutory_cues(text: str) -> list[str]:
+    seen, out = set(), []
+    for rx in _CUES:
+        for m in rx.finditer(text or ""):
+            c = " ".join(m.group(0).split())
+            if c.lower() not in seen:
+                seen.add(c.lower())
+                out.append(c)
+    return out
+
+
+def cue_phrase_search(con, text, n=3, exclude=()):
+    """Exact-phrase FTS5 hits for the letter's statutory cues.
+
+    For each cue phrase, chunks containing that exact phrase are ranked by BM25 against the
+    whole letter; chunks already in the pool are skipped. Picks round-robin across cues, up to n.
+    """
+    rest = fts_query(text)
+    per_cue = []
+    for c in statutory_cues(text):
+        t = tokens(c)
+        if not t:
+            continue
+        q = '"' + " ".join(t) + '"' + (f" AND ({rest})" if rest else "")
+        rows = con.execute("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?",
+                           (q, n + len(exclude)))
+        per_cue.append([r[0] for r in rows if r[0] not in exclude])
+    out = []
+    for i in range(n):
+        for ids in per_cue:
+            if i < len(ids) and ids[i] not in out and len(out) < n:
+                out.append(ids[i])
+    return out
+
+
 def vector_search(con, embedder, text, n=50):
     v = embedder.query(text[:2000])
     rows = con.execute("SELECT rowid FROM chunks_vec WHERE embedding MATCH ? AND k = ? ORDER BY distance", (pack(v), n))
@@ -68,7 +112,7 @@ def snippet(text, query_tokens, width=300):
     return ("…" if start else "") + s + ("…" if start + width < len(text) else "")
 
 
-def search(con, embedder, text, top=8, candidates=20, max_per_file=2, rerank=None, timings=None):
+def search(con, embedder, text, top=8, candidates=20, max_per_file=2, rerank=None, timings=None, cue_hits=3):
     """Return top chunks: [{rank, chunk_id, file, page, score, snippet, text}].
     BM25 + vector -> RRF -> cross-encoder rerank of the top `candidates` (20) -> at most `max_per_file` chunks per file."""
     import os
@@ -77,6 +121,12 @@ def search(con, embedder, text, top=8, candidates=20, max_per_file=2, rerank=Non
     kw = keyword_search(con, text)
     vec = vector_search(con, embedder, text)
     fused = rrf([kw, vec])[:candidates]
+    # keyword boost: union (not re-score) the top exact-phrase hits for statutory cues into the rerank pool
+    pool = {cid for cid, _ in fused}
+    cues = cue_phrase_search(con, text, n=cue_hits, exclude=pool)
+    fused = fused + [(cid, 0.0) for cid in cues]
+    if timings is not None:
+        timings["cue_candidates"] = len(cues)
     rows = {cid: con.execute("SELECT file, page, text FROM chunks WHERE id=?", (cid,)).fetchone() for cid, _ in fused}
     order = fused
     if rerank and fused:

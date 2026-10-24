@@ -1,3 +1,13 @@
 # Sample documents stay on disk but out of git (large binaries / third-party texts)
 samples/*
 !samples/INDEX.md
+
+# Office Desk Agent core: local-only stuff
+.venv/
+.cache/
+data/
+__pycache__/
+.pytest_cache/
+*.log
+*.err
+

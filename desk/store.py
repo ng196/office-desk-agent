@@ -1,0 +1,99 @@
+"""SQLite archive index: chunks + FTS5 keyword index + sqlite-vec vectors."""
+import hashlib
+import sqlite3
+import struct
+from pathlib import Path
+
+from .embed import DIM
+from .extract import chunk_page, extract_pages, ExtractError
+from .normalize import tokens
+
+SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS docs(id INTEGER PRIMARY KEY, file TEXT UNIQUE, sha256 TEXT, pages INTEGER);
+CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY, doc_id INTEGER REFERENCES docs(id),
+  file TEXT, page INTEGER, text TEXT);
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(terms, tokenize="porter unicode61 remove_diacritics 0 categories 'L* N* Co M*'");
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(embedding float[{DIM}]);
+"""
+
+
+def connect(db_path) -> sqlite3.Connection:
+    import sqlite_vec
+    con = sqlite3.connect(str(db_path))
+    con.enable_load_extension(True)
+    sqlite_vec.load(con)
+    con.enable_load_extension(False)
+    con.executescript(SCHEMA)
+    return con
+
+
+def pack(vec) -> bytes:
+    return struct.pack(f"{len(vec)}f", *vec)
+
+
+def sha256(path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def fts_terms(text: str) -> str:
+    """What FTS5 indexes: our normalised+stemmed tokens joined by spaces."""
+    return " ".join(tokens(text))
+
+
+def add_document(con, embedder, path, name=None, pages=None, min_page_chars=30) -> int:
+    """Index one file (or given [(page, text)] pages). Re-indexing the same name replaces it. Returns chunk count."""
+    name = name or Path(path).name
+    digest = sha256(path) if path and Path(path).exists() else hashlib.sha256(repr(pages).encode()).hexdigest()
+    row = con.execute("SELECT id, sha256 FROM docs WHERE file=?", (name,)).fetchone()
+    if row and row[1] == digest:
+        return 0
+    if row:
+        delete_document(con, name)
+    pages = pages if pages is not None else extract_pages(path)
+    items = [(pg, c) for pg, txt in pages if len(txt.strip()) >= min_page_chars for c in chunk_page(txt)]
+    cur = con.execute("INSERT INTO docs(file, sha256, pages) VALUES(?,?,?)", (name, digest, len(pages)))
+    doc_id = cur.lastrowid
+    vecs = embedder.passages([c for _, c in items]) if items else []
+    for (pg, c), v in zip(items, vecs):
+        cid = con.execute("INSERT INTO chunks(doc_id, file, page, text) VALUES(?,?,?,?)", (doc_id, name, pg, c)).lastrowid
+        con.execute("INSERT INTO chunks_fts(rowid, terms) VALUES(?,?)", (cid, fts_terms(c)))
+        con.execute("INSERT INTO chunks_vec(rowid, embedding) VALUES(?,?)", (cid, pack(v)))
+    con.commit()
+    return len(items)
+
+
+def delete_document(con, name):
+    ids = [r[0] for r in con.execute("SELECT c.id FROM chunks c JOIN docs d ON d.id=c.doc_id WHERE d.file=?", (name,))]
+    for cid in ids:
+        con.execute("DELETE FROM chunks_fts WHERE rowid=?", (cid,))
+        con.execute("DELETE FROM chunks_vec WHERE rowid=?", (cid,))
+        con.execute("DELETE FROM chunks WHERE id=?", (cid,))
+    con.execute("DELETE FROM docs WHERE file=?", (name,))
+    con.commit()
+
+
+# Files in samples/ that are legacy-font (Kruti Dev/Chanakya) or have a garbled/scanned text layer
+# (see samples/INDEX.md). They need the later Kruti Dev / OCR layers, so the core skips them.
+SKIP_SAMPLES = {
+    "gazette_india_2026_272395.pdf", "gazette_india_2025_263348.pdf", "gazette_india_2018_184457.pdf",
+    "godl_gazette_2017.pdf", "raj_pwd_tender_140.pdf", "raj_pwd_tender_38.pdf",
+    "rajbhasha_unicode_circular_2017.pdf", "csmop_2022_hi.pdf", "prashasnik_shabdavali_en_hi.pdf",
+}
+
+
+def index_folder(con, embedder, folder, skip=SKIP_SAMPLES, log=print):
+    total = 0
+    for p in sorted(Path(folder).iterdir()):
+        if p.suffix.lower() not in (".pdf", ".txt") or p.name in skip or p.name.upper() == "INDEX.MD":
+            continue
+        try:
+            n = add_document(con, embedder, p)
+            total += n
+            log(f"indexed {p.name}: {n} chunks" if n else f"unchanged {p.name}")
+        except ExtractError as e:
+            log(f"skipped {p.name}: {e}")
+    return total

@@ -1,0 +1,3 @@
+# Sample documents stay on disk but out of git (large binaries / third-party texts)
+samples/*
+!samples/INDEX.md

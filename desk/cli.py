@@ -21,7 +21,7 @@ def load_archive(con, files):
     return arc
 
 
-KEYS = ("rank", "chunk_id", "file", "page", "score", "in_keyword", "in_vector", "snippet")
+KEYS = ("rank", "chunk_id", "file", "page", "heading", "score", "in_keyword", "in_vector", "snippet")
 
 
 def answer(con, embedder, letter_path, lang="en", top=3, fields=None, use_llm=True, chat=None):

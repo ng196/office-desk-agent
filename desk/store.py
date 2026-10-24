@@ -12,7 +12,7 @@ from .normalize import tokens
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS docs(id INTEGER PRIMARY KEY, file TEXT UNIQUE, sha256 TEXT, pages INTEGER, doc_type TEXT);
 CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY, doc_id INTEGER REFERENCES docs(id),
-  file TEXT, page INTEGER, text TEXT);
+  file TEXT, page INTEGER, text TEXT, heading TEXT DEFAULT '');
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(terms, tokenize="porter unicode61 remove_diacritics 0 categories 'L* N* Co M*'");
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(embedding float[{DIM}]);
 """
@@ -28,6 +28,9 @@ def connect(db_path) -> sqlite3.Connection:
     if "doc_type" not in [r[1] for r in con.execute("PRAGMA table_info(docs)")]:  # older index.db
         con.execute("ALTER TABLE docs ADD COLUMN doc_type TEXT")
         con.commit()
+    if "heading" not in [r[1] for r in con.execute("PRAGMA table_info(chunks)")]:
+        con.execute("ALTER TABLE chunks ADD COLUMN heading TEXT DEFAULT ''")
+        con.commit()
     return con
 
 
@@ -35,7 +38,7 @@ DOC_TYPES_FILE = Path(__file__).with_name("doc_types.json")
 ROOT_SAMPLES = Path(__file__).resolve().parent.parent / "samples"
 DOC_TYPES = ("rule", "case", "reference")  # reference: indexed, never in the rules/cases lists
 # chunking per type; part of the stored digest so a change of chunker or tag re-indexes the file
-CHUNKER = {"rule": "section-v1", "case": "para-v1", "reference": "para-v1"}
+CHUNKER = {"rule": "section-v2", "case": "para-v1", "reference": "para-v1"}
 DEFAULT_TYPE = "case"
 
 
@@ -46,6 +49,11 @@ def load_doc_types(path=DOC_TYPES_FILE) -> dict:
     if bad:
         raise ValueError(f"doc_types.json: unknown type(s) {bad}")
     return t
+
+
+def heading_kind(name, path=DOC_TYPES_FILE) -> str:
+    """Word for bare heading numbers in a rule file's section labels ('Rule 65', 'Section 7'); from doc_types.json."""
+    return json.loads(Path(path).read_text(encoding="utf-8")).get("_heading_kind", {}).get(name, "")
 
 
 def doc_type_of(name, table=None) -> str:
@@ -86,6 +94,11 @@ def fts_terms(text: str) -> str:
     return " ".join(tokens(text))
 
 
+def with_heading(text, heading) -> str:
+    """What embedding / FTS / rerank see. chunks.text stays the raw page text (the only quotable text)."""
+    return f"{heading} — {text}" if heading else text
+
+
 def add_document(con, embedder, path, name=None, pages=None, min_page_chars=30, doc_type=None) -> int:
     """Index one file (or given [(page, text)] pages). Re-indexing the same name replaces it. Returns chunk count."""
     name = name or Path(path).name
@@ -105,15 +118,15 @@ def add_document(con, embedder, path, name=None, pages=None, min_page_chars=30, 
     n_pages = len(pages)
     pages = [(pg, txt) for pg, txt in pages if len(txt.strip()) >= min_page_chars]
     if doc_type == "rule":
-        items = section_chunks(pages)
+        items = section_chunks(pages, kind=heading_kind(name))
     else:
-        items = [(pg, c) for pg, txt in pages for c in chunk_page(txt)]
+        items = [(pg, c, "") for pg, txt in pages for c in chunk_page(txt)]
     cur = con.execute("INSERT INTO docs(file, sha256, pages, doc_type) VALUES(?,?,?,?)", (name, digest, n_pages, doc_type))
     doc_id = cur.lastrowid
-    vecs = embedder.passages([c for _, c in items]) if items else []
-    for (pg, c), v in zip(items, vecs):
-        cid = con.execute("INSERT INTO chunks(doc_id, file, page, text) VALUES(?,?,?,?)", (doc_id, name, pg, c)).lastrowid
-        con.execute("INSERT INTO chunks_fts(rowid, terms) VALUES(?,?)", (cid, fts_terms(c)))
+    vecs = embedder.passages([with_heading(c, h) for _, c, h in items]) if items else []
+    for (pg, c, h), v in zip(items, vecs):
+        cid = con.execute("INSERT INTO chunks(doc_id, file, page, text, heading) VALUES(?,?,?,?,?)", (doc_id, name, pg, c, h)).lastrowid
+        con.execute("INSERT INTO chunks_fts(rowid, terms) VALUES(?,?)", (cid, fts_terms(with_heading(c, h))))
         con.execute("INSERT INTO chunks_vec(rowid, embedding) VALUES(?,?)", (cid, pack(v)))
     con.commit()
     return len(items)

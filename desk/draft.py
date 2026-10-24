@@ -60,7 +60,8 @@ def build_messages(letter_text, hits, lang):
         block = []
         for h in lst:
             i += 1
-            block.append(f"[{i}] source_file: {h['file']} | page: {h['page']}\n{h['text']}")
+            sec = f" | section: {h['heading']} (label only, not quotable)" if h.get("heading") else ""
+            block.append(f"[{i}] source_file: {h['file']} | page: {h['page']}{sec}\n{h['text']}")
         parts.append(f"{titles.get(key, key.upper())}:\n" + "\n\n".join(block))
     src = "\n\n".join(parts)
     user = (f"INCOMING LETTER:\n{letter_text[:4000]}\n\n{src}\n\n"

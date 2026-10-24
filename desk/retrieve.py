@@ -2,7 +2,7 @@
 import re
 
 from .normalize import tokens
-from .store import pack
+from .store import pack, with_heading
 
 STOP = set("""the a an of to and or in on for is are was were be by with as at this that it from your you our we
 i my me has have had not no shall may will under any such which who whom been being its their there these those
@@ -135,7 +135,7 @@ def search(con, embedder, text, top=8, candidates=20, max_per_file=2, rerank=Non
     if rerank and fused:
         from . import rerank as rr
         t0 = time.perf_counter()
-        sc = rr.get().scores(text[:2000], [rows[cid][2] for cid, _ in fused])
+        sc = rr.get().scores(text[:2000], _rerank_texts(con, [cid for cid, _ in fused]))
         if timings is not None:
             timings["rerank_s"] = round(time.perf_counter() - t0, 3)
         order = sorted(zip([c for c, _ in fused], sc), key=lambda kv: (-kv[1], kv[0]))
@@ -154,27 +154,37 @@ def search(con, embedder, text, top=8, candidates=20, max_per_file=2, rerank=Non
     return out
 
 
+def _rerank_texts(con, ids):
+    rows = dict((i, (t, h)) for i, t, h in con.execute(
+        f"SELECT id, text, heading FROM chunks WHERE id IN ({','.join('?' * len(ids))})", ids))
+    return [with_heading(*rows[i]) for i in ids]
+
+
 def _hits(con, order, kw, vec, text, top, max_per_file):
-    rows = {cid: con.execute("SELECT file, page, text FROM chunks WHERE id=?", (cid,)).fetchone() for cid, _ in order}
+    rows = {cid: con.execute("SELECT file, page, text, heading FROM chunks WHERE id=?", (cid,)).fetchone() for cid, _ in order}
     qt = [t for t in tokens(text) if t not in STOP and len(t) > 3]
     out, per_file = [], {}
     for cid, score in order:
-        file, page, body = rows[cid]
+        file, page, body, heading = rows[cid]
         if per_file.get(file, 0) >= max_per_file:
             continue
         per_file[file] = per_file.get(file, 0) + 1
         out.append({"rank": len(out) + 1, "chunk_id": cid, "file": file, "page": page, "score": round(score, 5),
-                    "in_keyword": cid in kw, "in_vector": cid in vec, "snippet": snippet(body, qt), "text": body})
+                    "in_keyword": cid in kw, "in_vector": cid in vec, "snippet": snippet(body, qt), "text": body,
+                    "heading": heading or ""})
         if len(out) >= top:
             break
     return out
 
 
-def search_split(con, embedder, text, top=3, candidates=12, max_per_file=2, rerank=None, timings=None, cue_hits=3,
+POOL = {"rules": 20, "cases": 12}
+
+
+def search_split(con, embedder, text, top=3, candidates=None, max_per_file=2, rerank=None, timings=None, cue_hits=3,
                  per_type=50, depth=400):
     """Two lists, each from its own pool and reranked on its own: {"cases": [...], "rules": [...]}.
 
-    BM25 + vector (deep) -> split by the file's doc_type -> RRF of the top `per_type` of each -> top `candidates` (12)
+    BM25 + vector (deep) -> split by the file's doc_type -> RRF of the top `per_type` of each -> top POOL[type] (rules 20, cases 12)
     per type ('reference' files are in neither list); the rules pool also gets the statutory cue-phrase hits -> bge rerank (256 tokens) -> 2 per file -> top."""
     import os
     import time
@@ -186,7 +196,8 @@ def search_split(con, embedder, text, top=3, candidates=12, max_per_file=2, rera
     pools = {}
     for t in ("cases", "rules"):
         dt_ = t[:-1]
-        fused = rrf([[c for c in kw if types.get(c) == dt_][:per_type], [c for c in vec if types.get(c) == dt_][:per_type]])[:candidates]
+        n_pool = (candidates or POOL)[t] if isinstance(candidates or POOL, dict) else candidates
+        fused = rrf([[c for c in kw if types.get(c) == dt_][:per_type], [c for c in vec if types.get(c) == dt_][:per_type]])[:n_pool]
         if t == "rules":
             cues = cue_phrase_search(con, text, n=cue_hits, exclude={c for c, _ in fused}, doc_type="rule", types=types)
             fused += [(c, 0.0) for c in cues]
@@ -197,9 +208,8 @@ def search_split(con, embedder, text, top=3, candidates=12, max_per_file=2, rera
         from . import rerank as rr
         t0 = time.perf_counter()
         allc = pools["cases"] + pools["rules"]
-        body = dict(con.execute(f"SELECT id, text FROM chunks WHERE id IN ({','.join('?' * len(allc))})", [c for c, _ in allc]))
         # one batched call; each pair is scored on its own, so this equals reranking the two pools separately
-        sc = rr.get().scores(text[:2000], [body[c] for c, _ in allc])
+        sc = rr.get().scores(text[:2000], _rerank_texts(con, [c for c, _ in allc]))
         if timings is not None:
             timings["rerank_s"] = round(time.perf_counter() - t0, 3)
         n = len(pools["cases"])

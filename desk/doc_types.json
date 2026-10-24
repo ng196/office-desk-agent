@@ -1,5 +1,6 @@
 {
   "_about": "File-level type of every file in samples/. 'rule' = Acts, Rules, manuals (CSMOP), guidelines, circulars, memos, notifications. 'case' = orders, letters, judgments, tenders. 'reference' = glossaries: indexed but never in the rules/cases lists (for term help later). Set by hand, never guessed from content. Files not listed here are indexed as 'case' with a warning.",
+  "_heading_kind": {"ccs_leave_rules_1972.pdf": "Rule", "ccs_pension_rules_2021_en.pdf": "Rule", "rti_act_2005_en.pdf": "Section"},
   "ccs_leave_rules_1972.pdf": "rule",
   "ccs_pension_rules_2021_en.pdf": "rule",
   "cpgrams_comprehensive_guidelines.pdf": "rule",

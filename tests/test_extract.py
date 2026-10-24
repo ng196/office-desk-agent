@@ -1,6 +1,6 @@
 import pytest
 
-from desk.extract import chunk_page, extract_pages, section_chunks, ExtractError
+from desk.extract import chunk_page, extract_pages, heading_label, section_chunks, ExtractError
 
 
 def make_pdf(path, lines):
@@ -68,20 +68,42 @@ def norm_ws(s):
 
 def test_section_chunks_split_on_headings_and_keep_page():
     out = section_chunks([(9, ACT_P9), (10, ACT_P10)])
-    starts = [c[:12] for _, c in out]
-    assert any(c.startswith("7. Disposal of request") and "thirty days" in c and pg == 9 for pg, c in out)
-    assert any(c.startswith("8. Exemption") and pg == 10 for pg, c in out)
-    assert not any(c.startswith("12.7 of") for _, c in out), starts
-    # the run-over of s.7 onto p.10 is its own piece, cited to p.10; every piece is text of the page it cites
-    for pg, c in out:
+    starts = [c[:12] for _, c, _ in out]
+    assert any(c.startswith("7. Disposal of request") and "thirty days" in c and pg == 9 and h == "" for pg, c, h in out)
+    assert any(c.startswith("8. Exemption") and pg == 10 for pg, c, _ in out)
+    assert not any(c.startswith("12.7 of") for _, c, _ in out), starts
+    # the run-over of s.7 onto p.10 is its own piece, cited to p.10, labelled with s.7's heading
+    assert any(pg == 10 and c.startswith("(2) If the Central") and h == "7 — Disposal of request" for pg, c, h in out)
+    for pg, c, _ in out:  # every piece is raw text of the page it cites
         assert c in norm_ws({9: ACT_P9, 10: ACT_P10}[pg])
-    # nothing lost
-    assert norm_ws(" ".join(c for pg, c in out if pg == 9)) == norm_ws(ACT_P9)
+    assert norm_ws(" ".join(c for pg, c, _ in out if pg == 9)) == norm_ws(ACT_P9)  # nothing lost
 
 
 def test_section_chunks_hindi_and_oversize_fallback():
     out = section_chunks([(1, HI)], min_chars=50)
-    assert [c[:7] for _, c in out] == ["नियम 7.", "नियम 8."]
+    assert [c[:7] for _, c, _ in out] == ["नियम 7.", "नियम 8."]
     big = "5. Long rule.—" + "\n".join("(%d) sub-rule text that goes on and on for the test of size." % i for i in range(60))
-    pieces = section_chunks([(3, big)], max_chars=1500)
-    assert len(pieces) > 1 and all(len(c) <= 1500 and pg == 3 for pg, c in pieces)
+    pieces = section_chunks([(3, big)], max_chars=1500, kind="Rule")
+    assert len(pieces) > 1 and all(len(c) <= 1500 and pg == 3 for pg, c, _ in pieces)
+    assert pieces[0][2] == "" and all(h == "Rule 5 — Long rule" for _, _, h in pieces[1:])
+
+
+def test_heading_label():
+    assert heading_label("65. Interest on delayed payment of gratuity, pension and family pension.- (1) In all cases", kind="Rule") \
+        == "Rule 65 — Interest on delayed payment of gratuity, pension and family pension"
+    assert heading_label("7. Disposal of request.—(1) Subject to", kind="Section") == "Section 7 — Disposal of request"
+    assert heading_label("नियम 8. अर्धवेतन अवकाश") .startswith("नियम 8")
+
+
+def test_heading_prefix_is_not_quotable():
+    """The label helps search only: a quote from the raw piece verifies; a quote of the label on a page
+    that doesn't carry it is flagged."""
+    from desk.verify import verify_lines
+    big = "65. Interest on delayed payment.- " + "\n".join("(%d) sub-rule %d text that goes on for the size test." % (i, i) for i in range(60))
+    pieces = section_chunks([(46, big), (47, "(61) the run-over of rule sixty five onto the next page continues here with more words for length " * 3)], kind="Rule")
+    arc = {"r.pdf": [(46, " ".join(c for pg, c, _ in pieces if pg == 46)), (47, " ".join(c for pg, c, _ in pieces if pg == 47))]}
+    pg, c, h = pieces[-1]
+    assert pg == 47 and h.startswith("Rule 65") and h not in c
+    ok = verify_lines([{"sentence": "s", "source_file": "r.pdf", "page": 47, "verbatim_quote": c[:40]}], arc)[0]
+    bad = verify_lines([{"sentence": "s", "source_file": "r.pdf", "page": 47, "verbatim_quote": h}], arc)[0]
+    assert ok["verified"] and not bad["verified"]

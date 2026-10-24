@@ -6,7 +6,7 @@ Index -> retrieve -> draft -> verify. No UI, Kruti Dev, OCR, Approve/Outbox, egr
 ```powershell
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
-.venv\Scripts\python -m desk index            # indexes samples/ into data/index.db (downloads e5 model to .cache/)
+.venv\Scripts\python -m desk index            # indexes samples/ into data/index.db (downloads e5 to .cache/; the first search downloads the ~0.6 GB reranker)
 ```
 For the offline office box, copy `.cache/` along with the code and set `HF_HUB_OFFLINE=1`.
 
@@ -30,12 +30,14 @@ quote and verified/FLAG status, then the filled template); full JSON with `--jso
 | Normalise | `desk/normalize.py` | NFC, nukta split, drop ZWJ/ZWNJ, Devanagari digits -> ASCII, light Hindi plural stemmer |
 | Index | `desk/store.py` | SQLite: `chunks` + FTS5 (`chunks_fts`) + sqlite-vec (`chunks_vec`, 384-d). Legacy-font / garbled samples are skipped (`SKIP_SAMPLES`) until the Kruti Dev / OCR layers exist |
 | Embed | `desk/embed.py` | intfloat/multilingual-e5-small via fastembed (ONNX, CPU), `query:` / `passage:` prefixes |
-| Retrieve | `desk/retrieve.py` | BM25 top-50 + vector top-50, RRF k=60, ties by id |
+| Retrieve | `desk/retrieve.py` | BM25 top-50 + vector top-50, RRF k=60 (ties by id) -> top 20 reranked (256 tokens per pair) -> at most 2 chunks per file |
+| Rerank | `desk/rerank.py` | BAAI/bge-reranker-v2-m3 cross-encoder, int8 ONNX (onnx-community export), onnxruntime CPU. `DESK_NO_RERANK=1` turns it off |
 | Draft | `desk/draft.py`, `desk/llm.py` | LM Studio `/v1/chat/completions`, `response_format: json_schema`; each line `{sentence, source_file, page, verbatim_quote}`; key from `LMSTUDIO_API_KEY` (process or Windows user env) |
 | Verify | `desk/verify.py` | exact -> after normalisation -> RapidFuzz partial_ratio >= 95; else FLAG / FLAG wrong_source; cited file must be in the retrieved set |
 | Template | `desk/template.py` | fixed Hindi / English official layout; the model only fills the body lines |
 
 ## Credits (third-party, used as dependencies, not copied)
 pypdfium2 (Apache-2.0/BSD-3) · fastembed (Apache-2.0) · ONNX Runtime (MIT) · intfloat/multilingual-e5-small model (MIT) ·
+BAAI/bge-reranker-v2-m3 model (Apache-2.0; int8 ONNX export by onnx-community/bge-reranker-v2-m3-ONNX) · tokenizers (Apache-2.0) · huggingface_hub (Apache-2.0) ·
 sqlite-vec (Apache-2.0/MIT) · SQLite FTS5 (public domain) · RapidFuzz (MIT) · requests (Apache-2.0) · NumPy (BSD-3) ·
 pytest (MIT) · jsonschema (MIT). RRF: Cormack, Clarke & Büttcher, SIGIR 2009. LM Studio is a separate install (proprietary; not bundled).

@@ -1,6 +1,9 @@
 # Office Desk Agent core. All licences are permissive (see README "Credits").
 pypdfium2>=4.30      # PDF text (Apache-2.0 / BSD-3); PyMuPDF is NOT used (AGPL)
 fastembed>=0.4       # ONNX embedding runtime (Apache-2.0)
+onnxruntime>=1.17    # runs the reranker ONNX model on CPU (MIT)
+tokenizers>=0.15     # reranker tokenizer (Apache-2.0)
+huggingface_hub>=0.20  # one-time model download into .cache/ (Apache-2.0)
 sqlite-vec>=0.1.6    # vector search inside SQLite (Apache-2.0 / MIT)
 rapidfuzz>=3.0       # fuzzy quote check (MIT)
 requests>=2.31       # LM Studio HTTP client (Apache-2.0)

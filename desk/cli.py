@@ -25,9 +25,10 @@ def answer(con, embedder, letter_path, lang="en", top=6, fields=None, use_llm=Tr
     from .retrieve import search, top_files
     t0 = time.perf_counter()
     letter = "\n".join(t for _, t in extract_pages(letter_path))
-    hits = search(con, embedder, letter, top=top)
+    timings = {}
+    hits = search(con, embedder, letter, top=top, timings=timings)
     t_ret = time.perf_counter() - t0
-    out = {"letter_file": str(letter_path), "lang": lang, "retrieval_s": round(t_ret, 2),
+    out = {"letter_file": str(letter_path), "lang": lang, "retrieval_s": round(t_ret, 2), "rerank_s": timings.get("rerank_s"),
            "top_files": top_files(hits),
            "hits": [{k: h[k] for k in ("rank", "chunk_id", "file", "page", "score", "in_keyword", "in_vector", "snippet")} for h in hits]}
     if use_llm:
@@ -42,7 +43,7 @@ def answer(con, embedder, letter_path, lang="en", top=6, fields=None, use_llm=Tr
 
 
 def readable(out):
-    L = [f"Letter: {out['letter_file']}  (retrieval {out['retrieval_s']} s, total {out['total_s']} s)", "", "Closest past files / rules:"]
+    L = [f"Letter: {out['letter_file']}  (retrieval {out['retrieval_s']} s incl. rerank {out.get('rerank_s')} s, total {out['total_s']} s)", "", "Closest past files / rules:"]
     for h in out["hits"]:
         L.append(f"  {h['rank']}. {h['file']}  p.{h['page']}  — {h['snippet'][:160]}")
     d = out.get("draft")

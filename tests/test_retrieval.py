@@ -58,3 +58,23 @@ def test_13_3_reopen_same_results(fixture_db, embedder):
 def test_reindex_same_file_is_noop(fixture_db, embedder):
     from desk.store import add_document
     assert add_document(fixture_db[1], embedder, FIX / "R-07.txt", name="R-07") == 0
+
+
+def test_15_3_rerank_deterministic(fixture_db, embedder):
+    q = "अर्जित अवकाश नकदीकरण नियम"
+    assert doc_ranks(fixture_db[1], embedder, q) == doc_ranks(fixture_db[1], embedder, q)
+
+
+def test_15_2_english_query_hindi_doc_after_rerank(fixture_db, embedder):
+    assert "R-07" in doc_ranks(fixture_db[1], embedder, "rule on encashment of earned leave on retirement")[:3]
+
+
+def test_max_two_chunks_per_file(tmp_path, embedder):
+    from desk.store import connect, add_document
+    from desk.retrieve import search
+    con = connect(tmp_path / "m.db")
+    pages = [(i, f"Rule {i}. Leave encashment is allowed for earned leave, item {i}.") for i in range(1, 6)]
+    add_document(con, embedder, None, name="rules", pages=pages, min_page_chars=10)
+    add_document(con, embedder, FIX / "E-22.txt", name="E-22")
+    hits = search(con, embedder, "leave encashment", top=5)
+    assert sum(h["file"] == "rules" for h in hits) == 2 and "E-22" in [h["file"] for h in hits]

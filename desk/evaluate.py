@@ -24,6 +24,9 @@ def main(argv=None):
     con, emb = connect(DEFAULT_DB), Embedder()
     cases = json.loads((LETTERS / "cases.json").read_text(encoding="utf-8"))
     emb.query("warm up")
+    if __import__("os").environ.get("DESK_NO_RERANK") != "1":
+        from . import rerank
+        rerank.get().scores("warm up", ["warm up"])
     rows, found, total, ver, lines, tps = [], 0, 0, 0, 0, []
     for c in cases:
         out = answer(con, emb, LETTERS / c["letter"], lang=c.get("lang", "en"), top=6, use_llm=use_llm)
@@ -34,7 +37,7 @@ def main(argv=None):
             ok.append(hit)
             found += hit
             total += 1
-        row = {"id": c["id"], "recall@3": f"{sum(ok)}/{len(ok)}", "retrieval_s": out["retrieval_s"], "total_s": out["total_s"],
+        row = {"id": c["id"], "recall@3": f"{sum(ok)}/{len(ok)}", "retrieval_s": out["retrieval_s"], "rerank_s": out.get("rerank_s"), "total_s": out["total_s"],
                "top3": [(h["file"], h["page"]) for h in top3]}
         d = out.get("draft")
         if d:
@@ -53,6 +56,8 @@ def main(argv=None):
     summary = {"recall@3": round(found / total, 3) if total else None,
                "quotes_verified_pct": round(100 * ver / lines, 1) if lines else None,
                "mean_time_per_letter_s": round(sum(r["total_s"] for r in rows) / len(rows), 2),
+               "mean_rerank_s": round(sum(r["rerank_s"] or 0 for r in rows) / len(rows), 2),
+               "rerank": __import__("os").environ.get("DESK_NO_RERANK") != "1",
                "mean_tokens_per_s": round(sum(tps) / len(tps), 2) if tps else None, "llm_used": use_llm}
     print(json.dumps(summary))
     Path(a.out).write_text(json.dumps({"cases": rows, "summary": summary}, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -68,18 +68,36 @@ def snippet(text, query_tokens, width=300):
     return ("…" if start else "") + s + ("…" if start + width < len(text) else "")
 
 
-def search(con, embedder, text, top=8):
-    """Return top chunks: [{rank, chunk_id, file, page, score, snippet, text}]."""
+def search(con, embedder, text, top=8, candidates=20, max_per_file=2, rerank=None, timings=None):
+    """Return top chunks: [{rank, chunk_id, file, page, score, snippet, text}].
+    BM25 + vector -> RRF -> cross-encoder rerank of the top `candidates` (20) -> at most `max_per_file` chunks per file."""
+    import os
+    import time
+    rerank = (os.environ.get("DESK_NO_RERANK") != "1") if rerank is None else rerank
     kw = keyword_search(con, text)
     vec = vector_search(con, embedder, text)
-    fused = rrf([kw, vec])[:top]
+    fused = rrf([kw, vec])[:candidates]
+    rows = {cid: con.execute("SELECT file, page, text FROM chunks WHERE id=?", (cid,)).fetchone() for cid, _ in fused}
+    order = fused
+    if rerank and fused:
+        from . import rerank as rr
+        t0 = time.perf_counter()
+        sc = rr.get().scores(text[:2000], [rows[cid][2] for cid, _ in fused])
+        if timings is not None:
+            timings["rerank_s"] = round(time.perf_counter() - t0, 3)
+        order = sorted(zip([c for c, _ in fused], sc), key=lambda kv: (-kv[1], kv[0]))
     qt = [t for t in tokens(text) if t not in STOP and len(t) > 3]
-    out = []
-    for rank, (cid, score) in enumerate(fused, start=1):
-        file, page, body = con.execute("SELECT file, page, text FROM chunks WHERE id=?", (cid,)).fetchone()
-        out.append({"rank": rank, "chunk_id": cid, "file": file, "page": page, "score": round(score, 5),
+    out, per_file = [], {}
+    for cid, score in order:
+        file, page, body = rows[cid]
+        if per_file.get(file, 0) >= max_per_file:
+            continue
+        per_file[file] = per_file.get(file, 0) + 1
+        out.append({"rank": len(out) + 1, "chunk_id": cid, "file": file, "page": page, "score": round(score, 5),
                     "in_keyword": cid in kw, "in_vector": cid in vec,
                     "snippet": snippet(body, qt), "text": body})
+        if len(out) >= top:
+            break
     return out
 
 

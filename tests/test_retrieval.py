@@ -108,7 +108,7 @@ def test_cue_hits_join_rerank_pool(tmp_path, embedder):
 def test_doc_types_table_covers_samples():
     from desk.store import load_doc_types, ROOT_SAMPLES
     table = load_doc_types()
-    assert set(table.values()) <= {"rule", "case"}
+    assert set(table.values()) <= {"rule", "case", "reference"}
     if ROOT_SAMPLES.exists():
         files = {p.name for p in ROOT_SAMPLES.iterdir() if p.suffix.lower() in (".pdf", ".txt")}
         assert files <= set(table), sorted(files - set(table))
@@ -129,3 +129,13 @@ def test_split_lists_by_doc_type(tmp_path, embedder):
     # tag lives in the DB and follows the table on retag
     assert retag(con, table={"act.txt": "rule", "order.txt": "rule"}) == 1
     assert con.execute("SELECT doc_type FROM docs WHERE file='order.txt'").fetchone()[0] == "rule"
+
+
+def test_reference_files_in_neither_list(tmp_path, embedder):
+    from desk.store import connect, add_document
+    from desk.retrieve import search_split
+    con = connect(tmp_path / "r.db")
+    add_document(con, embedder, None, name="gloss.txt", doc_type="reference",
+                 pages=[(1, "Glossary: missing file - गुम फाइल; information - सूचना; thirty days - तीस दिन.")], min_page_chars=10)
+    lists = search_split(con, embedder, "missing file information thirty days", rerank=False)
+    assert lists == {"cases": [], "rules": []}

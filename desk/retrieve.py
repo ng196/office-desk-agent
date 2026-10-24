@@ -69,7 +69,7 @@ def statutory_cues(text: str) -> list[str]:
     return out
 
 
-def cue_phrase_search(con, text, n=3, exclude=(), doc_type=None):
+def cue_phrase_search(con, text, n=3, exclude=(), doc_type=None, types=None):
     """Exact-phrase FTS5 hits for the letter's statutory cues.
 
     For each cue phrase, chunks containing that exact phrase are ranked by BM25 against the
@@ -82,13 +82,11 @@ def cue_phrase_search(con, text, n=3, exclude=(), doc_type=None):
         if not t:
             continue
         q = '"' + " ".join(t) + '"' + (f" AND ({rest})" if rest else "")
-        if doc_type:
-            rows = con.execute("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? AND rowid IN "
-                               "(SELECT c.id FROM chunks c JOIN docs d ON d.id=c.doc_id WHERE d.doc_type=?) "
-                               "ORDER BY bm25(chunks_fts) LIMIT ?", (q, doc_type, n + len(exclude)))
-        else:
-            rows = con.execute("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?",
-                               (q, n + len(exclude)))
+        rows = con.execute("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?",
+                           (q, n + len(exclude) + (300 if doc_type else 0)))
+        if doc_type:  # filter in Python: an `IN (subquery)` on the FTS table cost ~3.6 s per letter
+            types = types or dict(con.execute("SELECT c.id, d.doc_type FROM chunks c JOIN docs d ON d.id=c.doc_id"))
+            rows = [r for r in rows if types.get(r[0]) == doc_type][:n + len(exclude)]
         per_cue.append([r[0] for r in rows if r[0] not in exclude])
     out = []
     for i in range(n):
@@ -172,12 +170,12 @@ def _hits(con, order, kw, vec, text, top, max_per_file):
     return out
 
 
-def search_split(con, embedder, text, top=3, candidates=20, max_per_file=2, rerank=None, timings=None, cue_hits=3,
+def search_split(con, embedder, text, top=3, candidates=12, max_per_file=2, rerank=None, timings=None, cue_hits=3,
                  per_type=50, depth=400):
     """Two lists, each from its own pool and reranked on its own: {"cases": [...], "rules": [...]}.
 
-    BM25 + vector (deep) -> split by the file's doc_type -> RRF of the top `per_type` of each -> top `candidates` (20)
-    per type; the rules pool also gets the statutory cue-phrase hits -> bge rerank (256 tokens) -> 2 per file -> top."""
+    BM25 + vector (deep) -> split by the file's doc_type -> RRF of the top `per_type` of each -> top `candidates` (12)
+    per type ('reference' files are in neither list); the rules pool also gets the statutory cue-phrase hits -> bge rerank (256 tokens) -> 2 per file -> top."""
     import os
     import time
     rerank = (os.environ.get("DESK_NO_RERANK") != "1") if rerank is None else rerank
@@ -190,7 +188,7 @@ def search_split(con, embedder, text, top=3, candidates=20, max_per_file=2, rera
         dt_ = t[:-1]
         fused = rrf([[c for c in kw if types.get(c) == dt_][:per_type], [c for c in vec if types.get(c) == dt_][:per_type]])[:candidates]
         if t == "rules":
-            cues = cue_phrase_search(con, text, n=cue_hits, exclude={c for c, _ in fused}, doc_type="rule")
+            cues = cue_phrase_search(con, text, n=cue_hits, exclude={c for c, _ in fused}, doc_type="rule", types=types)
             fused += [(c, 0.0) for c in cues]
             if timings is not None:
                 timings["cue_candidates"] = len(cues)

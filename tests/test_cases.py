@@ -36,6 +36,16 @@ def test_case_retrieval_recall_at_3(case, con, embedder):
 
 
 @need_db
+def test_rule_chunks_are_text_of_their_cited_page(con):
+    """Section chunks keep the page they cite: every RTI Act chunk is verbatim (whitespace-normalised) text of that page."""
+    from desk.extract import extract_pages
+    pages = {pg: " ".join(t.split()) for pg, t in extract_pages(ROOT / "samples" / "rti_act_2005_en.pdf")}
+    rows = con.execute("SELECT page, text FROM chunks WHERE file='rti_act_2005_en.pdf'").fetchall()
+    assert rows and all(t in pages[pg] for pg, t in rows)
+    assert any(pg == 9 and t.startswith("7. Disposal of request") and "thirty days" in t for pg, t in rows)
+
+
+@need_db
 def test_indexed_docs_tagged_from_table(con):
     from desk.store import load_doc_types
     table = load_doc_types()

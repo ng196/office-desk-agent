@@ -6,7 +6,7 @@ import struct
 from pathlib import Path
 
 from .embed import DIM
-from .extract import chunk_page, extract_pages, ExtractError
+from .extract import chunk_page, extract_pages, section_chunks, ExtractError
 from .normalize import tokens
 
 SCHEMA = f"""
@@ -33,7 +33,9 @@ def connect(db_path) -> sqlite3.Connection:
 
 DOC_TYPES_FILE = Path(__file__).with_name("doc_types.json")
 ROOT_SAMPLES = Path(__file__).resolve().parent.parent / "samples"
-DOC_TYPES = ("rule", "case")
+DOC_TYPES = ("rule", "case", "reference")  # reference: indexed, never in the rules/cases lists
+# chunking per type; part of the stored digest so a change of chunker or tag re-indexes the file
+CHUNKER = {"rule": "section-v1", "case": "para-v1", "reference": "para-v1"}
 DEFAULT_TYPE = "case"
 
 
@@ -92,6 +94,7 @@ def add_document(con, embedder, path, name=None, pages=None, min_page_chars=30, 
     doc_type = doc_type or doc_type_of(name)
     if doc_type not in DOC_TYPES:
         raise ValueError(f"doc_type must be one of {DOC_TYPES}")
+    digest = f"{digest}:{CHUNKER[doc_type]}"
     if row and row[1] == digest:
         con.execute("UPDATE docs SET doc_type=? WHERE id=?", (doc_type, row[0]))
         con.commit()
@@ -99,8 +102,13 @@ def add_document(con, embedder, path, name=None, pages=None, min_page_chars=30, 
     if row:
         delete_document(con, name)
     pages = pages if pages is not None else extract_pages(path)
-    items = [(pg, c) for pg, txt in pages if len(txt.strip()) >= min_page_chars for c in chunk_page(txt)]
-    cur = con.execute("INSERT INTO docs(file, sha256, pages, doc_type) VALUES(?,?,?,?)", (name, digest, len(pages), doc_type))
+    n_pages = len(pages)
+    pages = [(pg, txt) for pg, txt in pages if len(txt.strip()) >= min_page_chars]
+    if doc_type == "rule":
+        items = section_chunks(pages)
+    else:
+        items = [(pg, c) for pg, txt in pages for c in chunk_page(txt)]
+    cur = con.execute("INSERT INTO docs(file, sha256, pages, doc_type) VALUES(?,?,?,?)", (name, digest, n_pages, doc_type))
     doc_id = cur.lastrowid
     vecs = embedder.passages([c for _, c in items]) if items else []
     for (pg, c), v in zip(items, vecs):

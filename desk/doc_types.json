@@ -1,6 +1,22 @@
 {
   "_about": "File-level type of every file in samples/. 'rule' = Acts, Rules, manuals (CSMOP), guidelines, circulars, memos, notifications. 'case' = orders, letters, judgments, tenders. 'reference' = glossaries: indexed but never in the rules/cases lists (for term help later). Set by hand, never guessed from content. Files not listed here are indexed as 'case' with a warning.",
-  "_heading_kind": {"ccs_leave_rules_1972.pdf": "Rule", "ccs_pension_rules_2021_en.pdf": "Rule", "rti_act_2005_en.pdf": "Section"},
+  "_heading_kind": {
+    "ccs_leave_rules_1972.pdf": "Rule",
+    "ccs_pension_rules_2021_en.pdf": "Rule",
+    "rti_act_2005_en.pdf": "Section"
+  },
+  "_page_types": {
+    "_about": "Page ranges [first, last] (1-based PDF pages, inclusive) inside a rule book that hold forms, formats, annexures, appendices or sample letters, not rules. They go in the past-cases list. Read off the page headings by hand (FORM n / FORMAT n / APPENDIX n.n), never guessed at run time.",
+    "ccs_pension_rules_2021_en.pdf": {
+      "case": [[60, 111]]
+    },
+    "ccs_leave_rules_1972.pdf": {
+      "case": [[56, 73]]
+    },
+    "csmop_2022_en.pdf": {
+      "case": [[19, 20], [26, 28], [32, 33], [49, 53], [65, 76], [90, 90], [103, 116], [125, 125], [135, 146], [153, 156], [162, 173], [182, 182], [201, 208]]
+    }
+  },
   "ccs_leave_rules_1972.pdf": "rule",
   "ccs_pension_rules_2021_en.pdf": "rule",
   "cpgrams_comprehensive_guidelines.pdf": "rule",

@@ -36,7 +36,7 @@ Based on `components.md` (same row numbers). Written 24 Oct 2026 (IST).
 | 12 | Embeddings (multilingual-e5-small, fastembed) | Yes | Yes | ≤30 ms/chunk; ≤100 ms/query | ≤1 GB | MIT / Apache-2.0 |
 | 13 | Vector store (sqlite-vec / FAISS) | Yes | Yes | ≤50 ms top-10 over 100k | ≤1 GB | Apache-2.0 / MIT |
 | 14 | RRF fusion | Yes | Yes | ≤1 ms | n/a | own code |
-| 15 | Reranker (gte-multilingual-reranker-base or bge-reranker-v2-m3 int8) | Yes | Yes | ≤8 s per letter for rules 20 + cases 12 candidates × 256 tokens (whole search) | ≤1.5 GB | Apache-2.0 |
+| 15 | Reranker (gte-multilingual-reranker-base or bge-reranker-v2-m3 int8) | Yes | Yes | ≤8 s per letter for rules 16 + cases 12 candidates × 256 tokens (whole search) | ≤1.5 GB | Apache-2.0 |
 | 16 | LLM (Qwen3-4B or Qwen2.5-7B-Instruct, Q4 GGUF) | Yes (sideloaded) | Yes | Summary ≤30 s | 4B ≤4 GB, 7B ≤6.5 GB with 8k context | Apache-2.0 model |
 | 17 | Serving (LM Studio, localhost:1234) | Yes | Yes | Generation ≥8 tok/s (4B) / ≥4 tok/s (7B); time to first token ≤30 s for a 4k-token prompt | Included in row 16 | Proprietary, free for internal business use (see §0) |
 | 18 | Grounded drafting (json_schema) | Yes | Yes | Draft ≤120 s | Included in row 16 | n/a |
@@ -51,9 +51,10 @@ Based on `components.md` (same row numbers). Written 24 Oct 2026 (IST).
 
 > **Retrieval settings (24 Oct 2026, Desk Lead):**
 > - **Two lists:** top 3 *past cases* and top 3 *rules*, by a hand-made file-level tag in `desk/doc_types.json` (`rule`: Acts, Rules, CSMOP, guidelines, circulars, memos, notifications; `case`: orders, letters, judgments, tenders; `reference`: glossary, indexed but in neither list).
-> - **Pools:** rules 20, cases 12 (BM25 + vector, RRF k=60). The rules pool also gets up to 3 exact-phrase FTS5 hits for statutory cues in the letter (section/rule numbers, "thirty days"/"30 days", "… Act", धारा/नियम) as a union, not a re-score. Each pool is reranked with bge-reranker-v2-m3 (int8, CPU) at 256 tokens per pair; at most 2 chunks per file in each list. The reranker is loaded and warmed up once at process start.
+> - **Pools:** rules 16, cases 12 (BM25 + vector, RRF k=60). The rules pool also gets up to 3 exact-phrase FTS5 hits for statutory cues in the letter (section/rule numbers, "thirty days"/"30 days", "… Act", धारा/नियम) as a union, not a re-score. Each pool is reranked with bge-reranker-v2-m3 (int8, CPU) at 256 tokens per pair (section label cut to ≤20 tokens + raw chunk text); at most 2 chunks per file in each list. The reranker is loaded and warmed up once at process start.
 > - **Section chunking (`rule` files only; cases keep paragraph chunks ≤1200 chars):** split at headings at the start of a line (`7.`, `65.`, `12.5.`, `Rule 65`, `Section 7`, `धारा 7`, `नियम 8`; the title must start with a capital, `(` or Devanagari). A section running over a page break gives one piece per page, cited to that page. A section over 1500 characters falls back to paragraph chunks; a piece under 200 characters is merged into the previous piece on the same page.
-> - **Heading prefix:** every piece that does not start with its own heading (paragraph pieces of a long section, run-over pieces on the next page) carries its section label, e.g. `Rule 65 — Interest on delayed payment of gratuity, pension and family pension`. The label is used for embedding, FTS and rerank only; it is stored apart from the chunk text (`chunks.heading`), is never quotable, and quotes are verified against the raw page text.
+> - **Heading prefix:** every piece that does not start with its own heading (paragraph pieces of a long section, run-over pieces on the next page) carries its section label, e.g. `Rule 65 — Interest on delayed payment of gratuity, pension and family pension`. The label is used for embedding, FTS and rerank only; it is stored apart from the chunk text (`chunks.heading`), is never quotable, and quotes are verified against the raw page text. For the reranker the label is cut to at most 20 tokens and put in front of the raw text; the whole pair is capped at 256 tokens.
+> - **Appendix tagging (`_page_types` in `desk/doc_types.json`):** forms, formats, annexures, appendices and sample letters inside rule books are tagged `case` by an explicit page-range table read off the page headings (not guessed): CCS (Pension) Rules 2021 pp. 60–111 (Forms 1–13, Formats, sample letters, e.g. p. 106), CCS (Leave) Rules 1972 pp. 56–73 (Second Schedule, Forms), CSMOP 2022 (English) appendix pages 19–20, 26–28, 32–33, 49–53, 65–76, 90, 103–116, 125, 135–146, 153–156, 162–173, 182, 201–208. These pages go to the past-cases list; the rest of the book stays `rule`. Applied per chunk at search time from the stored page number (no re-embedding).
 
 ## 2. Unit tests (input → expected)
 Legacy-font strings were run on this box through two converters:
@@ -125,7 +126,7 @@ Legacy-font strings were run on this box through two converters:
 | 15.1 | "अर्जित अवकाश नकदीकरण नियम", `R-07` at rank 8 of 30 | `R-07` in the top 3 after reranking |
 | 15.2 | English query against Hindi candidates | Relevant Hindi doc in the top 3 |
 | 15.3 | Same input run twice | Identical order |
-| 15.4 | rules 20 + cases 12 candidates × 256 tokens | ≤8 s wall time on CPU (whole search per letter) |
+| 15.4 | rules 16 + cases 12 candidates × 256 tokens | ≤8 s wall time on CPU (whole search per letter) |
 | 16.1 | `GET /v1/models` | Lists the loaded model id |
 | 16.2 | `/v1/chat/completions`: summarise `L-1` in Hindi | ≤80 words; ≥90% Devanagari letters; contains "12/3/2025-प्रशा." verbatim |
 | 16.3 | Summarise `E-22` | English; contains "A-12011/5/2024-Estt." |

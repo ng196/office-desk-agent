@@ -10,6 +10,7 @@ REPO = "onnx-community/bge-reranker-v2-m3-ONNX"
 BASE_MODEL = "BAAI/bge-reranker-v2-m3"
 ONNX_FILE = "onnx/model_int8.onnx"
 MAX_LEN = 256  # 512 costs ~3.5x more CPU time per letter
+LABEL_TOKENS = 20  # section label in front of the raw chunk text, at most this many tokens
 
 
 class Reranker:
@@ -25,6 +26,13 @@ class Reranker:
         so.intra_op_num_threads = os.cpu_count()
         self.sess = ort.InferenceSession(os.path.join(d, ONNX_FILE), so, providers=["CPUExecutionProvider"])
         self.inputs = {i.name for i in self.sess.get_inputs()}
+
+    def short_label(self, label, n=LABEL_TOKENS) -> str:
+        """First n tokens of a section label (cut on a token boundary)."""
+        enc = self.tok.encode(label, add_special_tokens=False)
+        if len(enc.ids) <= n:
+            return label
+        return label[:enc.offsets[n - 1][1]].rstrip()
 
     def scores(self, query, passages, batch=8):
         out = []

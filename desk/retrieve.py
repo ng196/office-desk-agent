@@ -2,7 +2,7 @@
 import re
 
 from .normalize import tokens
-from .store import pack, with_heading
+from .store import chunk_types, pack, with_heading
 
 STOP = set("""the a an of to and or in on for is are was were be by with as at this that it from your you our we
 i my me has have had not no shall may will under any such which who whom been being its their there these those
@@ -85,7 +85,7 @@ def cue_phrase_search(con, text, n=3, exclude=(), doc_type=None, types=None):
         rows = con.execute("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?",
                            (q, n + len(exclude) + (300 if doc_type else 0)))
         if doc_type:  # filter in Python: an `IN (subquery)` on the FTS table cost ~3.6 s per letter
-            types = types or dict(con.execute("SELECT c.id, d.doc_type FROM chunks c JOIN docs d ON d.id=c.doc_id"))
+            types = types or chunk_types(con)
             rows = [r for r in rows if types.get(r[0]) == doc_type][:n + len(exclude)]
         per_cue.append([r[0] for r in rows if r[0] not in exclude])
     out = []
@@ -154,10 +154,11 @@ def search(con, embedder, text, top=8, candidates=20, max_per_file=2, rerank=Non
     return out
 
 
-def _rerank_texts(con, ids):
+def _rerank_texts(con, ids, shorten=None):
+    """Reranker input per chunk: short heading label (`shorten`, <= 20 tokens) + raw text; the tokenizer caps the pair at 256."""
     rows = dict((i, (t, h)) for i, t, h in con.execute(
         f"SELECT id, text, heading FROM chunks WHERE id IN ({','.join('?' * len(ids))})", ids))
-    return [with_heading(*rows[i]) for i in ids]
+    return [with_heading(t, shorten(h) if (shorten and h) else h) for t, h in (rows[i] for i in ids)]
 
 
 def _hits(con, order, kw, vec, text, top, max_per_file):
@@ -177,22 +178,22 @@ def _hits(con, order, kw, vec, text, top, max_per_file):
     return out
 
 
-POOL = {"rules": 20, "cases": 12}
+POOL = {"rules": 16, "cases": 12}
 
 
 def search_split(con, embedder, text, top=3, candidates=None, max_per_file=2, rerank=None, timings=None, cue_hits=3,
                  per_type=50, depth=400):
     """Two lists, each from its own pool and reranked on its own: {"cases": [...], "rules": [...]}.
 
-    BM25 + vector (deep) -> split by the file's doc_type -> RRF of the top `per_type` of each -> top POOL[type] (rules 20, cases 12)
-    per type ('reference' files are in neither list); the rules pool also gets the statutory cue-phrase hits -> bge rerank (256 tokens) -> 2 per file -> top."""
+    BM25 + vector (deep) -> split by the file's doc_type -> RRF of the top `per_type` of each -> top POOL[type] (rules 16, cases 12)
+    per type ('reference' files are in neither list); the rules pool also gets the statutory cue-phrase hits -> bge rerank (label <= 20 tokens + raw text, 256 tokens) -> 2 per file -> top."""
     import os
     import time
     rerank = (os.environ.get("DESK_NO_RERANK") != "1") if rerank is None else rerank
     kw = keyword_search(con, text, n=depth)
     vec = vector_search(con, embedder, text, n=depth)
     ids = set(kw) | set(vec)
-    types = dict(con.execute("SELECT c.id, d.doc_type FROM chunks c JOIN docs d ON d.id=c.doc_id")) if ids else {}
+    types = chunk_types(con) if ids else {}  # per page: forms/annexures/sample letters of rule books are "case"
     pools = {}
     for t in ("cases", "rules"):
         dt_ = t[:-1]
@@ -209,7 +210,8 @@ def search_split(con, embedder, text, top=3, candidates=None, max_per_file=2, re
         t0 = time.perf_counter()
         allc = pools["cases"] + pools["rules"]
         # one batched call; each pair is scored on its own, so this equals reranking the two pools separately
-        sc = rr.get().scores(text[:2000], _rerank_texts(con, [c for c, _ in allc]))
+        m = rr.get()
+        sc = m.scores(text[:2000], _rerank_texts(con, [c for c, _ in allc], shorten=m.short_label))
         if timings is not None:
             timings["rerank_s"] = round(time.perf_counter() - t0, 3)
         n = len(pools["cases"])

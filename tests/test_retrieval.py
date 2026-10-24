@@ -139,3 +139,49 @@ def test_reference_files_in_neither_list(tmp_path, embedder):
                  pages=[(1, "Glossary: missing file - गुम फाइल; information - सूचना; thirty days - तीस दिन.")], min_page_chars=10)
     lists = search_split(con, embedder, "missing file information thirty days", rerank=False)
     assert lists == {"cases": [], "rules": []}
+
+
+def test_page_types_table_tags_appendix_pages():
+    """Explicit page ranges in doc_types.json: forms / sample letters at the back of rule books are 'case'."""
+    from desk.store import load_page_types, page_type
+    pt = load_page_types()
+    assert page_type("ccs_pension_rules_2021_en.pdf", 106, pages=pt) == "case"  # sample letter
+    assert page_type("ccs_pension_rules_2021_en.pdf", 60, pages=pt) == "case"   # FORM 1
+    assert page_type("ccs_pension_rules_2021_en.pdf", 46, pages=pt) == "rule"   # Rule 65
+    assert page_type("ccs_leave_rules_1972.pdf", 60, pages=pt) == "case"
+    assert page_type("csmop_2022_en.pdf", 104, pages=pt) == "case"              # format of D.O. letter
+    assert page_type("csmop_2022_en.pdf", 117, pages=pt) == "rule"              # chapter 9 text
+    assert page_type("rti_act_2005_en.pdf", 9, pages=pt) == "rule"
+
+
+def test_appendix_pages_go_to_cases_list(tmp_path, embedder):
+    """A page listed in _page_types moves its chunks from the rules list to the past-cases list."""
+    from desk.store import connect, add_document, chunk_types
+    from desk.retrieve import search_split
+    con = connect(tmp_path / "p.db")
+    pt = {"book.txt": [(2, 2, "case")]}
+    add_document(con, embedder, None, name="book.txt", doc_type="rule", min_page_chars=10, pages=[
+        (1, "65. Interest on delayed payment of gratuity. Interest shall be paid where gratuity is delayed."),
+        (2, "Sir, I am directed to convey sanction of gratuity and interest on delayed payment. Yours faithfully")])
+    types = chunk_types(con, pages=pt)
+    assert sorted(types.values()) == ["case", "rule"]
+    import desk.retrieve as r
+    orig = r.chunk_types
+    r.chunk_types = lambda c: chunk_types(c, pages=pt)
+    try:
+        lists = search_split(con, embedder, "interest on delayed gratuity", top=3, rerank=False)
+    finally:
+        r.chunk_types = orig
+    assert [h["page"] for h in lists["rules"]] == [1] and [h["page"] for h in lists["cases"]] == [2]
+
+
+def test_rerank_label_at_most_20_tokens():
+    from desk.rerank import LABEL_TOKENS, MAX_LEN
+    from desk.retrieve import POOL
+    assert LABEL_TOKENS == 20 and MAX_LEN == 256 and POOL == {"rules": 16, "cases": 12}
+    from desk import rerank as rr
+    m = rr.get()
+    long = "Rule 65 — Interest on delayed payment of gratuity, pension and family pension where the delay is attributable to administrative lapses of the office"
+    short = m.short_label(long)
+    assert long.startswith(short) and len(m.tok.encode(short, add_special_tokens=False).ids) <= 20 < len(m.tok.encode(long, add_special_tokens=False).ids)
+    assert m.short_label("Rule 7 — Leave") == "Rule 7 — Leave"

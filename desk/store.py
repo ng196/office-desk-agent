@@ -56,6 +56,39 @@ def heading_kind(name, path=DOC_TYPES_FILE) -> str:
     return json.loads(Path(path).read_text(encoding="utf-8")).get("_heading_kind", {}).get(name, "")
 
 
+def load_page_types(path=DOC_TYPES_FILE) -> dict:
+    """Explicit page ranges inside a file that override its file-level type, e.g. the forms, annexures and
+    sample letters at the back of a rule book are 'case'. {file: [(first, last, type), ...]} (pages 1-based, inclusive)."""
+    raw = json.loads(Path(path).read_text(encoding="utf-8")).get("_page_types", {})
+    out = {}
+    for name, by_type in raw.items():
+        if name.startswith("_"):
+            continue
+        for t, ranges in by_type.items():
+            if t not in DOC_TYPES:
+                raise ValueError(f"doc_types.json _page_types: unknown type {t!r} for {name}")
+            for r in ranges:
+                a, b = (r, r) if isinstance(r, int) else r
+                out.setdefault(name, []).append((int(a), int(b), t))
+    return out
+
+
+def page_type(name, page, file_type=None, pages=None) -> str:
+    """Type of one page: the _page_types range it falls in, else the file's type."""
+    pages = load_page_types() if pages is None else pages
+    for a, b, t in pages.get(name, ()):
+        if a <= page <= b:
+            return t
+    return doc_type_of(name) if file_type is None else file_type
+
+
+def chunk_types(con, pages=None) -> dict:
+    """chunk id -> 'rule' | 'case' | 'reference' (file type from docs, page ranges from _page_types)."""
+    pages = load_page_types() if pages is None else pages
+    return {cid: page_type(f, pg, t, pages) for cid, f, pg, t in
+            con.execute("SELECT c.id, c.file, c.page, d.doc_type FROM chunks c JOIN docs d ON d.id=c.doc_id")}
+
+
 def doc_type_of(name, table=None) -> str:
     table = load_doc_types() if table is None else table
     return table.get(name, DEFAULT_TYPE)

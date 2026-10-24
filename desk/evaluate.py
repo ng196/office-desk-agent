@@ -25,23 +25,24 @@ def main(argv=None):
     cases = json.loads((LETTERS / "cases.json").read_text(encoding="utf-8"))
     emb.query("warm up")
     if __import__("os").environ.get("DESK_NO_RERANK") != "1":
-        import time as _t
         from . import rerank
-        t0 = _t.perf_counter()
-        rerank.get()  # loaded once per process (module-level cache), not per letter
-        print(json.dumps({"reranker_load_s": round(_t.perf_counter() - t0, 2)}))
+        print(json.dumps({"reranker_load_s": rerank.warm_up()}))  # once per process, not per letter
     rows, found, total, ver, lines, tps = [], 0, 0, 0, 0, []
+    per_list = {"cases": [0, 0], "rules": [0, 0]}
     for c in cases:
-        out = answer(con, emb, LETTERS / c["letter"], lang=c.get("lang", "en"), top=6, use_llm=use_llm)
-        top3 = [h for h in out["hits"][:3]]
-        ok = []
+        out = answer(con, emb, LETTERS / c["letter"], lang=c.get("lang", "en"), top=3, use_llm=use_llm)
+        res = {"cases": [], "rules": []}
         for e in c["expected"]:
-            hit = any(h["file"] == e["file"] and (not e.get("text_regex") or re.search(e["text_regex"], _chunk_text(con, h), re.I | re.S)) for h in top3)
-            ok.append(hit)
+            hit = expected_ok(con, out[e["list"]], e)
+            res[e["list"]].append(hit)
+            per_list[e["list"]][0] += hit
+            per_list[e["list"]][1] += 1
             found += hit
             total += 1
-        row = {"id": c["id"], "recall@3": f"{sum(ok)}/{len(ok)}", "retrieval_s": out["retrieval_s"], "rerank_s": out.get("rerank_s"), "total_s": out["total_s"],
-               "top3": [(h["file"], h["page"]) for h in top3]}
+        row = {"id": c["id"], **{f"recall@3_{t}": f"{sum(v)}/{len(v)}" for t, v in res.items() if v},
+               "retrieval_s": out["retrieval_s"], "rerank_s": out.get("rerank_s"), "total_s": out["total_s"],
+               "cases_top3": [(h["file"], h["page"]) for h in out["cases"]],
+               "rules_top3": [(h["file"], h["page"]) for h in out["rules"]]}
         d = out.get("draft")
         if d:
             v = sum(l["verified"] for l in d["lines"])
@@ -57,6 +58,7 @@ def main(argv=None):
         rows.append(row)
         print(json.dumps(row, ensure_ascii=False))
     summary = {"recall@3": round(found / total, 3) if total else None,
+               **{f"recall@3_{t}": round(f / n, 3) if n else None for t, (f, n) in per_list.items()},
                "quotes_verified_pct": round(100 * ver / lines, 1) if lines else None,
                "mean_time_per_letter_s": round(sum(r["total_s"] for r in rows) / len(rows), 2),
                "mean_rerank_s": round(sum(r["rerank_s"] or 0 for r in rows) / len(rows), 2),
@@ -67,7 +69,19 @@ def main(argv=None):
 
 
 def _chunk_text(con, h):
-    return con.execute("SELECT text FROM chunks WHERE id=?", (h["chunk_id"],)).fetchone()[0]
+    return h.get("text") or con.execute("SELECT text FROM chunks WHERE id=?", (h["chunk_id"],)).fetchone()[0]
+
+
+def expected_ok(con, hits, e):
+    """e: {list, file, text_regex?, page?, not_pages?}. A matching hit must be in `hits` (top 3), and no hit
+    from the same file on a `not_pages` page may rank above it."""
+    for h in hits:
+        if h["file"] == e["file"] and h["page"] in e.get("not_pages", []):
+            return False
+        if h["file"] == e["file"] and (e.get("page") is None or h["page"] == e["page"]) and \
+                (not e.get("text_regex") or re.search(e["text_regex"], _chunk_text(con, h), re.I | re.S)):
+            return True
+    return False
 
 
 if __name__ == "__main__":

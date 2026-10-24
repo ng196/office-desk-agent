@@ -2,6 +2,7 @@
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -20,22 +21,29 @@ def load_archive(con, files):
     return arc
 
 
-def answer(con, embedder, letter_path, lang="en", top=6, fields=None, use_llm=True, chat=None):
+KEYS = ("rank", "chunk_id", "file", "page", "score", "in_keyword", "in_vector", "snippet")
+
+
+def answer(con, embedder, letter_path, lang="en", top=3, fields=None, use_llm=True, chat=None):
+    """Returns {"cases": top past cases, "rules": top rules, ...}; both lists go to the drafter."""
     from .extract import extract_pages
-    from .retrieve import search, top_files
+    from .retrieve import search_split, top_files
     t0 = time.perf_counter()
     letter = "\n".join(t for _, t in extract_pages(letter_path))
     timings = {}
-    hits = search(con, embedder, letter, top=top, timings=timings)
+    lists = search_split(con, embedder, letter, top=top, timings=timings)
     t_ret = time.perf_counter() - t0
     out = {"letter_file": str(letter_path), "lang": lang, "retrieval_s": round(t_ret, 2), "rerank_s": timings.get("rerank_s"),
-           "top_files": top_files(hits),
-           "hits": [{k: h[k] for k in ("rank", "chunk_id", "file", "page", "score", "in_keyword", "in_vector", "snippet")} for h in hits]}
+           "cue_candidates": timings.get("cue_candidates")}
+    for t in ("cases", "rules"):
+        out[t] = [{k: h[k] for k in KEYS} for h in lists[t]]
+        out[f"top_files_{t}"] = top_files(lists[t])
     if use_llm:
         from . import draft, llm
         kw = {"chat": chat} if chat else {}
+        files = {h["file"] for t in lists for h in lists[t]}
         try:
-            out["draft"] = draft.make_draft(letter, hits, load_archive(con, {h["file"] for h in hits}), lang=lang, fields=fields, **kw)
+            out["draft"] = draft.make_draft(letter, lists, load_archive(con, files), lang=lang, fields=fields, **kw)
         except llm.LLMError as e:
             out["draft_error"] = str(e)
     out["total_s"] = round(time.perf_counter() - t0, 2)
@@ -43,9 +51,9 @@ def answer(con, embedder, letter_path, lang="en", top=6, fields=None, use_llm=Tr
 
 
 def readable(out):
-    L = [f"Letter: {out['letter_file']}  (retrieval {out['retrieval_s']} s incl. rerank {out.get('rerank_s')} s, total {out['total_s']} s)", "", "Closest past files / rules:"]
-    for h in out["hits"]:
-        L.append(f"  {h['rank']}. {h['file']}  p.{h['page']}  — {h['snippet'][:160]}")
+    L = [f"Letter: {out['letter_file']}  (retrieval {out['retrieval_s']} s incl. rerank {out.get('rerank_s')} s, total {out['total_s']} s)"]
+    for t, title in (("cases", "Closest past cases:"), ("rules", "Rules that apply:")):
+        L += ["", title] + [f"  {h['rank']}. {h['file']}  p.{h['page']}  — {h['snippet'][:160]}" for h in out[t]] + ([] if out[t] else ["  (none)"])
     d = out.get("draft")
     if d:
         L += ["", f"Summary: {d['summary']}", "", "Draft lines:"]
@@ -68,7 +76,7 @@ def main(argv=None):
     pa = sub.add_parser("answer", help="letter file in -> top files + cited draft")
     pa.add_argument("letter")
     pa.add_argument("--lang", choices=["en", "hi"], default="en")
-    pa.add_argument("--top", type=int, default=6)
+    pa.add_argument("--top", type=int, default=3, help="results per list (past cases, rules)")
     pa.add_argument("--json", help="also write the full JSON here")
     pa.add_argument("--no-llm", action="store_true", help="retrieval only")
     for k in ("ref-no", "office", "to", "signatory", "reference", "date"):
@@ -91,6 +99,9 @@ def main(argv=None):
         n = index_folder(con, emb, a.folder)
         print(f"done: {n} new chunks in {time.perf_counter() - t0:.1f} s -> {a.db}")
         return 0
+    if os.environ.get("DESK_NO_RERANK") != "1":
+        from . import rerank
+        print(f"reranker ready in {rerank.warm_up()} s (loaded once per process)", file=sys.stderr)
     fields = {k: v for k, v in {"ref_no": a.ref_no, "office": a.office, "to": a.to, "signatory": a.signatory,
                                 "reference": a.reference, "date": a.date}.items() if v}
     out = answer(con, emb, a.letter, lang=a.lang, top=a.top, fields=fields, use_llm=not a.no_llm)

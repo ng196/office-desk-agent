@@ -69,7 +69,7 @@ def statutory_cues(text: str) -> list[str]:
     return out
 
 
-def cue_phrase_search(con, text, n=3, exclude=()):
+def cue_phrase_search(con, text, n=3, exclude=(), doc_type=None):
     """Exact-phrase FTS5 hits for the letter's statutory cues.
 
     For each cue phrase, chunks containing that exact phrase are ranked by BM25 against the
@@ -82,8 +82,13 @@ def cue_phrase_search(con, text, n=3, exclude=()):
         if not t:
             continue
         q = '"' + " ".join(t) + '"' + (f" AND ({rest})" if rest else "")
-        rows = con.execute("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?",
-                           (q, n + len(exclude)))
+        if doc_type:
+            rows = con.execute("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? AND rowid IN "
+                               "(SELECT c.id FROM chunks c JOIN docs d ON d.id=c.doc_id WHERE d.doc_type=?) "
+                               "ORDER BY bm25(chunks_fts) LIMIT ?", (q, doc_type, n + len(exclude)))
+        else:
+            rows = con.execute("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?",
+                               (q, n + len(exclude)))
         per_cue.append([r[0] for r in rows if r[0] not in exclude])
     out = []
     for i in range(n):
@@ -149,6 +154,60 @@ def search(con, embedder, text, top=8, candidates=20, max_per_file=2, rerank=Non
         if len(out) >= top:
             break
     return out
+
+
+def _hits(con, order, kw, vec, text, top, max_per_file):
+    rows = {cid: con.execute("SELECT file, page, text FROM chunks WHERE id=?", (cid,)).fetchone() for cid, _ in order}
+    qt = [t for t in tokens(text) if t not in STOP and len(t) > 3]
+    out, per_file = [], {}
+    for cid, score in order:
+        file, page, body = rows[cid]
+        if per_file.get(file, 0) >= max_per_file:
+            continue
+        per_file[file] = per_file.get(file, 0) + 1
+        out.append({"rank": len(out) + 1, "chunk_id": cid, "file": file, "page": page, "score": round(score, 5),
+                    "in_keyword": cid in kw, "in_vector": cid in vec, "snippet": snippet(body, qt), "text": body})
+        if len(out) >= top:
+            break
+    return out
+
+
+def search_split(con, embedder, text, top=3, candidates=20, max_per_file=2, rerank=None, timings=None, cue_hits=3,
+                 per_type=50, depth=400):
+    """Two lists, each from its own pool and reranked on its own: {"cases": [...], "rules": [...]}.
+
+    BM25 + vector (deep) -> split by the file's doc_type -> RRF of the top `per_type` of each -> top `candidates` (20)
+    per type; the rules pool also gets the statutory cue-phrase hits -> bge rerank (256 tokens) -> 2 per file -> top."""
+    import os
+    import time
+    rerank = (os.environ.get("DESK_NO_RERANK") != "1") if rerank is None else rerank
+    kw = keyword_search(con, text, n=depth)
+    vec = vector_search(con, embedder, text, n=depth)
+    ids = set(kw) | set(vec)
+    types = dict(con.execute("SELECT c.id, d.doc_type FROM chunks c JOIN docs d ON d.id=c.doc_id")) if ids else {}
+    pools = {}
+    for t in ("cases", "rules"):
+        dt_ = t[:-1]
+        fused = rrf([[c for c in kw if types.get(c) == dt_][:per_type], [c for c in vec if types.get(c) == dt_][:per_type]])[:candidates]
+        if t == "rules":
+            cues = cue_phrase_search(con, text, n=cue_hits, exclude={c for c, _ in fused}, doc_type="rule")
+            fused += [(c, 0.0) for c in cues]
+            if timings is not None:
+                timings["cue_candidates"] = len(cues)
+        pools[t] = fused
+    if rerank and any(pools.values()):
+        from . import rerank as rr
+        t0 = time.perf_counter()
+        allc = pools["cases"] + pools["rules"]
+        body = dict(con.execute(f"SELECT id, text FROM chunks WHERE id IN ({','.join('?' * len(allc))})", [c for c, _ in allc]))
+        # one batched call; each pair is scored on its own, so this equals reranking the two pools separately
+        sc = rr.get().scores(text[:2000], [body[c] for c, _ in allc])
+        if timings is not None:
+            timings["rerank_s"] = round(time.perf_counter() - t0, 3)
+        n = len(pools["cases"])
+        for t, part in (("cases", sc[:n]), ("rules", sc[n:])):
+            pools[t] = sorted(zip([c for c, _ in pools[t]], part), key=lambda kv: (-kv[1], kv[0]))
+    return {t: _hits(con, pools[t], kw, vec, text, top, max_per_file) for t in ("cases", "rules")}
 
 
 def top_files(hits):

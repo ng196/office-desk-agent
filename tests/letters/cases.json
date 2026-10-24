@@ -1,12 +1,13 @@
 [
   {"id": "C5", "letter": "c5_late_pension.txt", "lang": "en",
-   "note": "Late pension: must find CCS (Pension) Rules 2021 Rule 65 (interest), not Rule 68 (accommodation dues)",
-   "expected": [{"file": "ccs_pension_rules_2021_en.pdf", "text_regex": "65\\.\\s*Interest on delayed payment|interest on delayed payment"}]},
+   "note": "Late pension: rules list must have CCS (Pension) Rules 2021 Rule 65 (interest, p.46), not Rule 68 (accommodation dues, p.48)",
+   "expected": [{"list": "rules", "file": "ccs_pension_rules_2021_en.pdf", "page": 46, "not_pages": [48],
+                 "text_regex": "65\\.\\s*Interest on delayed payment|interest on delayed payment"}]},
   {"id": "C1", "letter": "c1_rti_missing_file.txt", "lang": "en",
-   "note": "RTI with 'file missing' refusal: RTI Act s.7(1) 30 days + CIC Om Prakash order (missing file is no exemption)",
-   "expected": [{"file": "rti_act_2005_en.pdf", "text_regex": "thirty days"},
-                {"file": "cic_2014_omprakash_missing_file.pdf"}]},
+   "note": "RTI with 'file missing' refusal: rules list has RTI Act s.7(1) 30 days (p.9); cases list has CIC Om Prakash order (missing file is no exemption)",
+   "expected": [{"list": "rules", "file": "rti_act_2005_en.pdf", "page": 9, "text_regex": "thirty days"},
+                {"list": "cases", "file": "cic_2014_omprakash_missing_file.pdf"}]},
   {"id": "C12", "letter": "c12_pension_pending_hi.txt", "lang": "hi",
-   "note": "Hindi citizen letter, pension pending >1 yr with interest asked: cross-lingual hit on CCS (Pension) Rules 2021",
-   "expected": [{"file": "ccs_pension_rules_2021_en.pdf"}]}
+   "note": "Hindi citizen letter, pension pending >1 yr with interest asked: cross-lingual hit on CCS (Pension) Rules 2021 in the rules list",
+   "expected": [{"list": "rules", "file": "ccs_pension_rules_2021_en.pdf"}]}
 ]

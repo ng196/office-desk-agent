@@ -47,3 +47,11 @@ def get():
     if _INSTANCE is None:
         _INSTANCE = Reranker()
     return _INSTANCE
+
+
+def warm_up() -> float:
+    """Load model + ORT session and run one tiny pair, so the first letter doesn't pay for it. Returns seconds."""
+    import time
+    t0 = time.perf_counter()
+    get().scores("warm up", ["warm up"])
+    return round(time.perf_counter() - t0, 2)

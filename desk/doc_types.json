@@ -1,0 +1,22 @@
+{
+  "_about": "File-level type of every file in samples/. 'rule' = Acts, Rules, manuals (CSMOP), guidelines, circulars, memos, notifications. 'case' = orders, letters, judgments. Set by hand, never guessed from content. Files not listed here are indexed as 'case' with a warning.",
+  "ccs_leave_rules_1972.pdf": "rule",
+  "ccs_pension_rules_2021_en.pdf": "rule",
+  "cpgrams_comprehensive_guidelines.pdf": "rule",
+  "csmop_2022_en.pdf": "rule",
+  "csmop_2022_hi.pdf": "rule",
+  "rti_act_2005_en.pdf": "rule",
+  "rajbhasha_unicode_circular_2017.pdf": "rule",
+  "gazette_india_2018_184457.pdf": "rule",
+  "gazette_india_2025_263348.pdf": "rule",
+  "gazette_india_2026_272395.pdf": "rule",
+  "godl_gazette_2017.pdf": "rule",
+  "prashasnik_shabdavali_en_hi.pdf": "rule",
+  "raj_pwd_tender_140.pdf": "rule",
+  "raj_pwd_tender_38.pdf": "rule",
+  "cic_2014_omprakash_missing_file.pdf": "case",
+  "cic_2017_jafa_v_mosje.txt": "case",
+  "cic_2024_devender_v_cbse.txt": "case",
+  "delhihc_2025_kalusingh_wrong_provision.txt": "case",
+  "jharkhand_hc_2026_santlal_pension_contempt.pdf": "case"
+}

@@ -21,19 +21,26 @@ def con():
     return connect(DB)
 
 
-def hit_ok(h, exp):
-    return h["file"] == exp["file"] and (not exp.get("text_regex") or re.search(exp["text_regex"], h["text"], re.I | re.S))
-
-
 @need_db
 @pytest.mark.parametrize("case", CASES, ids=[c["id"] for c in CASES])
 def test_case_retrieval_recall_at_3(case, con, embedder):
+    """Each expectation is checked in its own list (rules or past cases), top 3."""
+    from desk.evaluate import expected_ok
     from desk.extract import extract_pages
-    from desk.retrieve import search
+    from desk.retrieve import search_split
     letter = extract_pages(Path(__file__).parent / "letters" / case["letter"])[0][1]
-    hits = search(con, embedder, letter, top=3)
+    lists = search_split(con, embedder, letter, top=3)
     for exp in case["expected"]:
-        assert any(hit_ok(h, exp) for h in hits), f"{exp} not in top 3: {[(h['file'], h['page']) for h in hits]}"
+        got = [(h["file"], h["page"]) for h in lists[exp["list"]]]
+        assert expected_ok(con, lists[exp["list"]], exp), f"{exp} not in {exp['list']} top 3: {got}"
+
+
+@need_db
+def test_indexed_docs_tagged_from_table(con):
+    from desk.store import load_doc_types
+    table = load_doc_types()
+    rows = con.execute("SELECT file, doc_type FROM docs").fetchall()
+    assert rows and all(table.get(f) == t for f, t in rows), [r for r in rows if table.get(r[0]) != r[1]]
 
 
 @need_db

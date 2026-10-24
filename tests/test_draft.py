@@ -60,3 +60,14 @@ def test_key_never_in_error(monkeypatch):
         llm.list_models()
     except llm.LLMError as e:
         assert "not set" in str(e)
+
+
+def test_draft_gets_both_lists():
+    reply = {"summary": "s", "subject": "x", "lines": [
+        {"sentence": "नकदीकरण 300 दिन तक है।", "source_file": "R-07", "page": 1, "verbatim_quote": "अधिकतम 300 दिन तक"}]}
+    chat, seen = fake_chat(reply)
+    d = draft.make_draft("letter", {"cases": [HITS[1]], "rules": [HITS[0]]}, ARC, lang="hi", fields=FIELDS, chat=chat)
+    msg = seen["messages"][1]["content"]
+    assert "RULES (" in msg and "PAST CASES (" in msg
+    assert "[1] source_file: F-101" in msg and "[2] source_file: R-07" in msg
+    assert d["lines"][0]["verified"]

@@ -1,5 +1,6 @@
 """SQLite archive index: chunks + FTS5 keyword index + sqlite-vec vectors."""
 import hashlib
+import json
 import sqlite3
 import struct
 from pathlib import Path
@@ -9,7 +10,7 @@ from .extract import chunk_page, extract_pages, ExtractError
 from .normalize import tokens
 
 SCHEMA = f"""
-CREATE TABLE IF NOT EXISTS docs(id INTEGER PRIMARY KEY, file TEXT UNIQUE, sha256 TEXT, pages INTEGER);
+CREATE TABLE IF NOT EXISTS docs(id INTEGER PRIMARY KEY, file TEXT UNIQUE, sha256 TEXT, pages INTEGER, doc_type TEXT);
 CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY, doc_id INTEGER REFERENCES docs(id),
   file TEXT, page INTEGER, text TEXT);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(terms, tokenize="porter unicode61 remove_diacritics 0 categories 'L* N* Co M*'");
@@ -24,7 +25,46 @@ def connect(db_path) -> sqlite3.Connection:
     sqlite_vec.load(con)
     con.enable_load_extension(False)
     con.executescript(SCHEMA)
+    if "doc_type" not in [r[1] for r in con.execute("PRAGMA table_info(docs)")]:  # older index.db
+        con.execute("ALTER TABLE docs ADD COLUMN doc_type TEXT")
+        con.commit()
     return con
+
+
+DOC_TYPES_FILE = Path(__file__).with_name("doc_types.json")
+ROOT_SAMPLES = Path(__file__).resolve().parent.parent / "samples"
+DOC_TYPES = ("rule", "case")
+DEFAULT_TYPE = "case"
+
+
+def load_doc_types(path=DOC_TYPES_FILE) -> dict:
+    """Explicit file -> 'rule' | 'case' table (desk/doc_types.json)."""
+    t = {k: v for k, v in json.loads(Path(path).read_text(encoding="utf-8")).items() if not k.startswith("_")}
+    bad = {k: v for k, v in t.items() if v not in DOC_TYPES}
+    if bad:
+        raise ValueError(f"doc_types.json: unknown type(s) {bad}")
+    return t
+
+
+def doc_type_of(name, table=None) -> str:
+    table = load_doc_types() if table is None else table
+    return table.get(name, DEFAULT_TYPE)
+
+
+def retag(con, table=None, log=None) -> int:
+    """Apply the table to docs already in the DB (no re-embedding). Returns rows changed."""
+    table = load_doc_types() if table is None else table
+    n = 0
+    for (name, cur) in con.execute("SELECT file, doc_type FROM docs").fetchall():
+        t = table.get(name)
+        if t is None and log:
+            log(f"warning: {name} not in doc_types.json, tagged '{DEFAULT_TYPE}'")
+        t = t or DEFAULT_TYPE
+        if t != cur:
+            con.execute("UPDATE docs SET doc_type=? WHERE file=?", (t, name))
+            n += 1
+    con.commit()
+    return n
 
 
 def pack(vec) -> bytes:
@@ -44,18 +84,23 @@ def fts_terms(text: str) -> str:
     return " ".join(tokens(text))
 
 
-def add_document(con, embedder, path, name=None, pages=None, min_page_chars=30) -> int:
+def add_document(con, embedder, path, name=None, pages=None, min_page_chars=30, doc_type=None) -> int:
     """Index one file (or given [(page, text)] pages). Re-indexing the same name replaces it. Returns chunk count."""
     name = name or Path(path).name
     digest = sha256(path) if path and Path(path).exists() else hashlib.sha256(repr(pages).encode()).hexdigest()
     row = con.execute("SELECT id, sha256 FROM docs WHERE file=?", (name,)).fetchone()
+    doc_type = doc_type or doc_type_of(name)
+    if doc_type not in DOC_TYPES:
+        raise ValueError(f"doc_type must be one of {DOC_TYPES}")
     if row and row[1] == digest:
+        con.execute("UPDATE docs SET doc_type=? WHERE id=?", (doc_type, row[0]))
+        con.commit()
         return 0
     if row:
         delete_document(con, name)
     pages = pages if pages is not None else extract_pages(path)
     items = [(pg, c) for pg, txt in pages if len(txt.strip()) >= min_page_chars for c in chunk_page(txt)]
-    cur = con.execute("INSERT INTO docs(file, sha256, pages) VALUES(?,?,?)", (name, digest, len(pages)))
+    cur = con.execute("INSERT INTO docs(file, sha256, pages, doc_type) VALUES(?,?,?,?)", (name, digest, len(pages), doc_type))
     doc_id = cur.lastrowid
     vecs = embedder.passages([c for _, c in items]) if items else []
     for (pg, c), v in zip(items, vecs):
@@ -96,4 +141,5 @@ def index_folder(con, embedder, folder, skip=SKIP_SAMPLES, log=print):
             log(f"indexed {p.name}: {n} chunks" if n else f"unchanged {p.name}")
         except ExtractError as e:
             log(f"skipped {p.name}: {e}")
+    retag(con, log=log)
     return total

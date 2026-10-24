@@ -42,16 +42,36 @@ SYSTEM = {
 }
 
 
+def as_lists(hits):
+    """hits: {"rules": [...], "cases": [...]} (or a plain list, treated as one untyped list)."""
+    return hits if isinstance(hits, dict) else {"sources": hits}
+
+
+def flat(hits):
+    return [h for lst in as_lists(hits).values() for h in lst]
+
+
 def build_messages(letter_text, hits, lang):
-    src = "\n\n".join(f"[{i}] source_file: {h['file']} | page: {h['page']}\n{h['text']}" for i, h in enumerate(hits, 1))
-    user = f"INCOMING LETTER:\n{letter_text[:4000]}\n\nSOURCES:\n{src}\n\nWrite 3-6 body sentences for the reply."
+    titles = {"rules": "RULES (Acts, Rules, manuals, circulars)", "cases": "PAST CASES (orders, letters, judgments)", "sources": "SOURCES"}
+    parts, i = [], 0
+    for key, lst in as_lists(hits).items():
+        if not lst:
+            continue
+        block = []
+        for h in lst:
+            i += 1
+            block.append(f"[{i}] source_file: {h['file']} | page: {h['page']}\n{h['text']}")
+        parts.append(f"{titles.get(key, key.upper())}:\n" + "\n\n".join(block))
+    src = "\n\n".join(parts)
+    user = (f"INCOMING LETTER:\n{letter_text[:4000]}\n\n{src}\n\n"
+            "Write 3-6 body sentences for the reply. Cite the rule that applies from RULES; use PAST CASES as precedent.")
     return [{"role": "system", "content": SYSTEM[lang]}, {"role": "user", "content": user}]
 
 
 def make_draft(letter_text, hits, archive, lang="en", fields=None, model=llm.DEFAULT_MODEL, chat=llm.chat_json, **kw):
     """archive: {file: [(page, text)]} used for quote checking. `chat` is injectable for tests."""
     data, stats = chat(build_messages(letter_text, hits, lang), SCHEMA, model=model, **kw)
-    retrieved = {h["file"] for h in hits}
+    retrieved = {h["file"] for h in flat(hits)}
     lines = verify_lines(data["lines"], archive)
     for ln in lines:
         if ln.get("source_file") and ln["source_file"] not in retrieved:

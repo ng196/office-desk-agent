@@ -30,8 +30,9 @@ quote and verified/FLAG status, then the filled template); full JSON with `--jso
 | Normalise | `desk/normalize.py` | NFC, nukta split, drop ZWJ/ZWNJ, Devanagari digits -> ASCII, light Hindi plural stemmer |
 | Index | `desk/store.py` | SQLite: `chunks` + FTS5 (`chunks_fts`) + sqlite-vec (`chunks_vec`, 384-d). Legacy-font / garbled samples are skipped (`SKIP_SAMPLES`) until the Kruti Dev / OCR layers exist |
 | Embed | `desk/embed.py` | intfloat/multilingual-e5-small via fastembed (ONNX, CPU), `query:` / `passage:` prefixes |
-| Retrieve | `desk/retrieve.py` | BM25 top-50 + vector top-50, RRF k=60 (ties by id) -> top 20 reranked (256 tokens per pair) -> at most 2 chunks per file |
-| Rerank | `desk/rerank.py` | BAAI/bge-reranker-v2-m3 cross-encoder, int8 ONNX (onnx-community export), onnxruntime CPU. `DESK_NO_RERANK=1` turns it off |
+| Doc types | `desk/doc_types.json` | Hand-made table: each sample file is `rule` (Acts, Rules, CSMOP, guidelines, circulars, memos) or `case` (orders, letters, judgments). Stored in `docs.doc_type`; unlisted files default to `case` with a warning |
+| Retrieve | `desk/retrieve.py` | Two lists, **past cases** and **rules**, top 3 each. Per type: BM25 + vector, RRF k=60 (ties by id) -> top 20; the rules pool also gets up to 3 exact-phrase hits for statutory cues in the letter (section/rule numbers, "thirty days", "... Act", धारा/नियम) -> reranked (256 tokens per pair) -> at most 2 chunks per file. Both lists go to the drafter |
+| Rerank | `desk/rerank.py` | BAAI/bge-reranker-v2-m3 cross-encoder, int8 ONNX (onnx-community export), onnxruntime CPU. Loaded and warmed up once at CLI/eval start. `DESK_NO_RERANK=1` turns it off |
 | Draft | `desk/draft.py`, `desk/llm.py` | LM Studio `/v1/chat/completions`, `response_format: json_schema`; each line `{sentence, source_file, page, verbatim_quote}`; key from `LMSTUDIO_API_KEY` (process or Windows user env) |
 | Verify | `desk/verify.py` | exact -> after normalisation -> RapidFuzz partial_ratio >= 95; else FLAG / FLAG wrong_source; cited file must be in the retrieved set |
 | Template | `desk/template.py` | fixed Hindi / English official layout; the model only fills the body lines |

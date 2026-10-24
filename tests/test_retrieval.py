@@ -103,3 +103,29 @@ def test_cue_hits_join_rerank_pool(tmp_path, embedder):
     t = {}
     hits = search(con, embedder, letter, top=30, candidates=1, max_per_file=30, rerank=False, timings=t)
     assert 30 in [h["page"] for h in hits] and len(hits) == 1 + t["cue_candidates"]
+
+
+def test_doc_types_table_covers_samples():
+    from desk.store import load_doc_types, ROOT_SAMPLES
+    table = load_doc_types()
+    assert set(table.values()) <= {"rule", "case"}
+    if ROOT_SAMPLES.exists():
+        files = {p.name for p in ROOT_SAMPLES.iterdir() if p.suffix.lower() in (".pdf", ".txt")}
+        assert files <= set(table), sorted(files - set(table))
+
+
+def test_split_lists_by_doc_type(tmp_path, embedder):
+    """Rules and past cases come back as separate lists, each from its own pool; cue hits go to the rules pool."""
+    from desk.store import connect, add_document, retag
+    from desk.retrieve import search_split
+    con = connect(tmp_path / "s.db")
+    add_document(con, embedder, None, name="act.txt", doc_type="rule",
+                 pages=[(1, "7. Disposal of request. The information shall be provided within thirty days of the receipt of the request.")], min_page_chars=10)
+    add_document(con, embedder, None, name="order.txt", doc_type="case",
+                 pages=[(1, "Order: the appellant asked for information; the public authority said the file was missing.")], min_page_chars=10)
+    t = {}
+    lists = search_split(con, embedder, "My RTI request about a missing file got no reply within thirty days.", rerank=False, timings=t)
+    assert [h["file"] for h in lists["rules"]] == ["act.txt"] and [h["file"] for h in lists["cases"]] == ["order.txt"]
+    # tag lives in the DB and follows the table on retag
+    assert retag(con, table={"act.txt": "rule", "order.txt": "rule"}) == 1
+    assert con.execute("SELECT doc_type FROM docs WHERE file='order.txt'").fetchone()[0] == "rule"

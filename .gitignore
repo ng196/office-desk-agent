@@ -11,3 +11,9 @@ __pycache__/
 *.log
 *.err
 
+
+# Secrets
+.env
+.env.*
+!.env.example
+

@@ -1,5 +1,6 @@
 """Grounded draft: retrieved chunks -> LLM (json_schema) -> verified lines -> fixed template."""
 import datetime as dt
+import re
 
 from . import llm
 from .template import render
@@ -69,11 +70,29 @@ def build_messages(letter_text, hits, lang):
     return [{"role": "system", "content": SYSTEM[lang]}, {"role": "user", "content": user}]
 
 
+_SRC_NO = re.compile(r"^\s*\[?\s*(\d+)\s*\]?\s*$")
+
+
+def resolve_source_refs(lines, hits):
+    """Small models sometimes put the source number ("[2]") in source_file instead of the file name.
+    Map it back to that numbered source (same order as build_messages); the page is kept if given."""
+    numbered = flat(hits)
+    for ln in lines:
+        m = _SRC_NO.match(str(ln.get("source_file") or ""))
+        if m and 1 <= int(m.group(1)) <= len(numbered):
+            h = numbered[int(m.group(1)) - 1]
+            ln["source_ref"] = ln["source_file"]
+            ln["source_file"] = h["file"]
+            if ln.get("page") is None:
+                ln["page"] = h["page"]
+    return lines
+
+
 def make_draft(letter_text, hits, archive, lang="en", fields=None, model=llm.DEFAULT_MODEL, chat=llm.chat_json, **kw):
     """archive: {file: [(page, text)]} used for quote checking. `chat` is injectable for tests."""
     data, stats = chat(build_messages(letter_text, hits, lang), SCHEMA, model=model, **kw)
     retrieved = {h["file"] for h in flat(hits)}
-    lines = verify_lines(data["lines"], archive)
+    lines = verify_lines(resolve_source_refs(data["lines"], hits), archive)
     for ln in lines:
         if ln.get("source_file") and ln["source_file"] not in retrieved:
             ln["status"], ln["verified"] = "FLAG not_in_retrieved", False

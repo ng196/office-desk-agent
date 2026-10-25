@@ -24,7 +24,7 @@ def load_archive(con, files):
 KEYS = ("rank", "chunk_id", "file", "page", "heading", "score", "in_keyword", "in_vector", "snippet")
 
 
-def answer(con, embedder, letter_path, lang="en", top=3, fields=None, use_llm=True, chat=None):
+def answer(con, embedder, letter_path, lang="en", top=3, fields=None, use_llm=True, chat=None, model=None):
     """Returns {"cases": top past cases, "rules": top rules, ...}; both lists go to the drafter."""
     from .extract import extract_pages
     from .retrieve import search_split, top_files
@@ -41,12 +41,15 @@ def answer(con, embedder, letter_path, lang="en", top=3, fields=None, use_llm=Tr
     if use_llm:
         from . import draft, llm
         kw = {"chat": chat} if chat else {}
+        if model:
+            kw["model"] = model
         files = {h["file"] for t in lists for h in lists[t]}
         try:
             out["draft"] = draft.make_draft(letter, lists, load_archive(con, files), lang=lang, fields=fields, **kw)
         except llm.LLMError as e:
             out["draft_error"] = str(e)
     out["total_s"] = round(time.perf_counter() - t0, 2)
+    out["draft_s"] = round(out["total_s"] - out["retrieval_s"], 2) if use_llm else None
     return out
 
 
@@ -79,9 +82,10 @@ def main(argv=None):
     pa.add_argument("--top", type=int, default=3, help="results per list (past cases, rules)")
     pa.add_argument("--json", help="also write the full JSON here")
     pa.add_argument("--no-llm", action="store_true", help="retrieval only")
+    pa.add_argument("--model", help="drafting model id (default DESK_LLM_MODEL, qwen-3.8-27b on Cerebras)")
     for k in ("ref-no", "office", "to", "signatory", "reference", "date"):
         pa.add_argument(f"--{k}")
-    sub.add_parser("models", help="list models loaded in LM Studio")
+    sub.add_parser("models", help="list models the drafting API offers")
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -104,7 +108,7 @@ def main(argv=None):
         print(f"reranker ready in {rerank.warm_up()} s (loaded once per process)", file=sys.stderr)
     fields = {k: v for k, v in {"ref_no": a.ref_no, "office": a.office, "to": a.to, "signatory": a.signatory,
                                 "reference": a.reference, "date": a.date}.items() if v}
-    out = answer(con, emb, a.letter, lang=a.lang, top=a.top, fields=fields, use_llm=not a.no_llm)
+    out = answer(con, emb, a.letter, lang=a.lang, top=a.top, fields=fields, use_llm=not a.no_llm, model=a.model)
     print(readable(out))
     if a.json:
         Path(a.json).write_text(json.dumps(out, ensure_ascii=False, indent=2, default=str), encoding="utf-8")

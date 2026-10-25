@@ -6,7 +6,7 @@ tokenizers>=0.15     # reranker tokenizer (Apache-2.0)
 huggingface_hub>=0.20  # one-time model download into .cache/ (Apache-2.0)
 sqlite-vec>=0.1.6    # vector search inside SQLite (Apache-2.0 / MIT)
 rapidfuzz>=3.0       # fuzzy quote check (MIT)
-requests>=2.31       # LM Studio HTTP client (Apache-2.0)
+requests>=2.31       # drafting API HTTP client (Apache-2.0)
 numpy>=1.26          # (BSD-3)
 # tests
 pytest>=8            # (MIT)

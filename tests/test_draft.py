@@ -54,7 +54,6 @@ def test_paraphrased_quote_unverified():
 
 def test_key_never_in_error(monkeypatch):
     from desk import llm
-    monkeypatch.delenv("LMSTUDIO_API_KEY", raising=False)
     monkeypatch.setattr(llm, "api_key", lambda: None)
     try:
         llm.list_models()
@@ -71,3 +70,56 @@ def test_draft_gets_both_lists():
     assert "RULES (" in msg and "PAST CASES (" in msg
     assert "[1] source_file: F-101" in msg and "[2] source_file: R-07" in msg
     assert d["lines"][0]["verified"]
+
+
+def test_source_number_in_source_file_is_resolved():
+    """Live qwen 4B wrote source_file "[2]" (the source number); it maps to that numbered source and verifies."""
+    reply = {"summary": "s", "subject": "x", "lines": [
+        {"sentence": "a", "source_file": "[2]", "page": 1, "verbatim_quote": "प्रशासन अनुभाग में विचाराधीन"},
+        {"sentence": "b", "source_file": "[9]", "page": 1, "verbatim_quote": "q"}]}
+    d = draft.make_draft("letter", HITS, ARC, fields=FIELDS, chat=fake_chat(reply)[0])
+    assert d["lines"][0]["source_file"] == "F-101" and d["lines"][0]["verified"]
+    assert not d["lines"][1]["verified"]
+
+
+def test_parse_json_strips_think_and_fences():
+    from desk import llm
+    assert llm.parse_json('<think>x</think>\n```json\n{"a": 1}\n```') == {"a": 1}
+    assert llm.parse_json('Here: {"a": [1, 2]} done') == {"a": [1, 2]}
+
+
+def test_json_schema_rejected_falls_back_to_strict_prompt(monkeypatch):
+    from desk import llm
+
+    class Resp:
+        def __init__(self, code, payload=None, text=""):
+            self.status_code, self._p, self.text = code, payload, text
+
+        def json(self):
+            return self._p
+    calls = []
+
+    def post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        if "response_format" in json:
+            return Resp(400, text='{"message": "response_format json_schema not supported"}')
+        return Resp(200, {"choices": [{"message": {"content": '{"summary": "s", "subject": "x", "lines": []}'}}],
+                          "usage": {"completion_tokens": 10}})
+    monkeypatch.setattr(llm, "api_key", lambda: "dummy")
+    monkeypatch.setattr(llm.requests, "post", post)
+    data, stats = llm.chat_json([{"role": "system", "content": "sys"}, {"role": "user", "content": "u"}], {"type": "object"})
+    assert data["subject"] == "x" and stats["json_schema_fallback"] is True
+    assert len(calls) == 2 and "JSON Schema" in calls[1]["messages"][0]["content"]
+
+
+def test_load_env_does_not_override(tmp_path, monkeypatch):
+    from desk import llm
+    p = tmp_path / ".env"
+    p.write_text("# c\nDESK_T1=fromfile\nDESK_T2=fromfile\nDESK_T3=\n", encoding="utf-8")
+    monkeypatch.setenv("DESK_T1", "already")
+    monkeypatch.delenv("DESK_T2", raising=False)
+    monkeypatch.delenv("DESK_T3", raising=False)
+    llm.load_env(p)
+    import os
+    assert os.environ["DESK_T1"] == "already" and os.environ["DESK_T2"] == "fromfile" and "DESK_T3" not in os.environ
+    monkeypatch.delenv("DESK_T2")

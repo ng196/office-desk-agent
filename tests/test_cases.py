@@ -1,5 +1,5 @@
 """Real-case scenarios (docs/real-cases.md) against the samples/ index. Needs `python -m desk index` first;
-live drafting needs LMSTUDIO_API_KEY."""
+live drafting needs CEREBRAS_API_KEY in .env (or DESK_LLM_PROVIDER=lmstudio + LMSTUDIO_API_KEY)."""
 import json
 import re
 from pathlib import Path
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DB = ROOT / "data" / "index.db"
 CASES = json.loads((Path(__file__).parent / "letters" / "cases.json").read_text(encoding="utf-8"))
 need_db = pytest.mark.skipif(not DB.exists(), reason="run `python -m desk index` first")
-need_key = pytest.mark.skipif(not llm.api_key(), reason="LMSTUDIO_API_KEY not set")
+need_key = pytest.mark.skipif(not llm.api_key(), reason=f"{llm.KEY_VAR} not set")
 
 
 @pytest.fixture(scope="module")
@@ -60,7 +60,8 @@ def test_c5_live_draft_cites_rule_65_not_68(con, embedder):
     case = next(c for c in CASES if c["id"] == "C5")
     out = answer(con, embedder, Path(__file__).parent / "letters" / case["letter"], lang="en")
     d = out["draft"]
-    text = " ".join(l["sentence"] + " " + (l.get("verbatim_quote") or "") for l in d["lines"])
+    from desk.evaluate import draft_text
+    text = draft_text(d["lines"])  # same text the eval "cites" field is taken from
     assert re.search(r"\b(rule|नियम)?\s*65\b", text, re.I) and not re.search(r"\brule\s*68\b", text, re.I)
 
 

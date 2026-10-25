@@ -18,7 +18,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-llm", action="store_true")
     ap.add_argument("--out", default=str(ROOT / "data" / "eval.json"))
-    ap.add_argument("--model", default=llm.DEFAULT_MODEL, help="drafting model id (default DESK_LLM_MODEL, qwen-3.8-27b on Cerebras)")
+    ap.add_argument("--model", default=llm.DEFAULT_MODEL, help="drafting model id (default DESK_LLM_MODEL, qwen/qwen3.8-27b on Groq)")
     ap.add_argument("--only", help="comma-separated case ids, e.g. C1,C5,C12")
     a = ap.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")

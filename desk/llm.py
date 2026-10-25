@@ -1,8 +1,9 @@
 """Drafting LLM client (OpenAI-compatible chat/completions). Keys are never printed, logged or stored.
 
-Default (development): Cerebras, settings from the repo-root .env (git-ignored):
-  CEREBRAS_API_KEY, CEREBRAS_BASE_URL (https://api.cerebras.ai/v1), DESK_LLM_MODEL (qwen-3.8-27b).
-LM Studio is off unless DESK_LLM_PROVIDER=lmstudio (key LMSTUDIO_API_KEY, URL LMSTUDIO_URL)."""
+Settings come from the repo-root .env (git-ignored). DESK_LLM_PROVIDER picks the API (default groq):
+  groq      GROQ_API_KEY, GROQ_BASE_URL (https://api.groq.com/openai/v1), DESK_LLM_MODEL (qwen/qwen3.8-27b)
+  cerebras  CEREBRAS_API_KEY, CEREBRAS_BASE_URL (https://api.cerebras.ai/v1), DESK_LLM_MODEL (qwen-3.8-27b)
+  lmstudio  LMSTUDIO_API_KEY, LMSTUDIO_URL (http://localhost:1234), DESK_LLM_MODEL (qwen3.8-4b-distill)"""
 import json
 import os
 import re
@@ -30,15 +31,19 @@ def load_env(path=ENV_FILE):
 
 
 load_env()
-PROVIDER = os.environ.get("DESK_LLM_PROVIDER", "cerebras").lower()
-if PROVIDER == "lmstudio":
-    BASE = os.environ.get("LMSTUDIO_URL", "http://localhost:1234").rstrip("/") + "/v1"
-    KEY_VAR = "LMSTUDIO_API_KEY"
-    DEFAULT_MODEL = os.environ.get("DESK_LLM_MODEL", "qwen3.8-4b-distill")
-else:
-    BASE = os.environ.get("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1").rstrip("/")
-    KEY_VAR = "CEREBRAS_API_KEY"
-    DEFAULT_MODEL = os.environ.get("DESK_LLM_MODEL", "qwen-3.8-27b")
+PROVIDERS = {  # name: (key var, base-url var, default base url, default model)
+    "groq": ("GROQ_API_KEY", "GROQ_BASE_URL", "https://api.groq.com/openai/v1", "qwen/qwen3.8-27b"),
+    "cerebras": ("CEREBRAS_API_KEY", "CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1", "qwen-3.8-27b"),
+    "lmstudio": ("LMSTUDIO_API_KEY", "LMSTUDIO_URL", "http://localhost:1234", "qwen3.8-4b-distill"),
+}
+PROVIDER = os.environ.get("DESK_LLM_PROVIDER", "groq").strip().lower()
+if PROVIDER not in PROVIDERS:
+    raise ImportError(f"DESK_LLM_PROVIDER must be one of {sorted(PROVIDERS)}")
+KEY_VAR, _url_var, _url_default, _model_default = PROVIDERS[PROVIDER]
+BASE = os.environ.get(_url_var, _url_default).rstrip("/")
+if PROVIDER == "lmstudio" and not BASE.endswith("/v1"):
+    BASE += "/v1"
+DEFAULT_MODEL = os.environ.get("DESK_LLM_MODEL", _model_default)
 
 
 class LLMError(Exception):
@@ -117,7 +122,7 @@ def chat_json(messages, schema, model=None, temperature=0.1, max_tokens=4000, ti
         body["messages"] = _fallback_messages(messages, schema)
         r, wall = _post(body, timeout)
     if r.status_code != 200:
-        raise LLMError(f"chat/completions returned HTTP {r.status_code}: {r.text[:300]}")
+        raise LLMError(f"chat/completions returned HTTP {r.status_code}")
     data = r.json()
     content = data["choices"][0]["message"].get("content")
     usage = data.get("usage") or {}
@@ -127,7 +132,9 @@ def chat_json(messages, schema, model=None, temperature=0.1, max_tokens=4000, ti
              "prompt_tokens": usage.get("prompt_tokens"), "completion_tokens": out_tok,
              "tokens_per_s_incl_prompt": round(out_tok / wall, 2) if out_tok else None,
              "json_schema_fallback": fallback}
-    if out_tok and ti.get("completion_time"):  # Cerebras server-side generation time
+    if not ti and isinstance(usage.get("completion_time"), (int, float)):  # Groq puts timings in usage
+        ti = usage
+    if out_tok and ti.get("completion_time"):  # server-side generation time (Cerebras/Groq)
         stats["tokens_per_s_generation"] = round(out_tok / ti["completion_time"], 1)
     if isinstance(data.get("stats"), dict):  # LM Studio-specific, if present
         stats["lmstudio_stats"] = data["stats"]

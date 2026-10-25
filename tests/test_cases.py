@@ -1,5 +1,5 @@
 """Real-case scenarios (docs/real-cases.md) against the samples/ index. Needs `python -m desk index` first;
-live drafting needs CEREBRAS_API_KEY in .env (or DESK_LLM_PROVIDER=lmstudio + LMSTUDIO_API_KEY)."""
+live drafting needs the provider key in .env (default GROQ_API_KEY)."""
 import json
 import re
 from pathlib import Path

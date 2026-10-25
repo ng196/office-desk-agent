@@ -82,7 +82,7 @@ def main(argv=None):
     pa.add_argument("--top", type=int, default=3, help="results per list (past cases, rules)")
     pa.add_argument("--json", help="also write the full JSON here")
     pa.add_argument("--no-llm", action="store_true", help="retrieval only")
-    pa.add_argument("--model", help="drafting model id (default DESK_LLM_MODEL, qwen-3.8-27b on Cerebras)")
+    pa.add_argument("--model", help="drafting model id (default DESK_LLM_MODEL, qwen/qwen3.8-27b on Groq)")
     for k in ("ref-no", "office", "to", "signatory", "reference", "date"):
         pa.add_argument(f"--{k}")
     sub.add_parser("models", help="list models the drafting API offers")

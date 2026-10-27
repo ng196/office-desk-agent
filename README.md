@@ -39,7 +39,8 @@ mockup/index.html     clickable UI mockup (single HTML file, fake data)
 docs/                 notes and design docs (empty for now)
 ```
 
-## Licence
-MIT (see LICENSE). Third-party components: THIRD_PARTY_NOTICES.md.
+## Third-party notices
+See THIRD_PARTY_NOTICES.md for dependency and model licences. No project LICENSE file.
+
 
 `Dockerfile` and `fly.toml` are NOT used (Fly.io hosting was dropped); kept for reference only.

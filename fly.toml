@@ -1,3 +1,4 @@
+# NOT USED: Fly.io hosting was dropped ($0 budget). Kept for reference only; the engine runs locally (see CORE.md).
 # Fly.io demo deploy: one machine, one volume at /data (index, cases, audit log, model cache).
 # Secrets (never in this file): fly secrets set GROQ_API_KEY=... DESK_DEMO_PASSCODE=...
 app = "office-desk-agent-ng"

@@ -1,5 +1,9 @@
 # Office Desk Agent (working name)
 
+> **Hosting note:** the public preview at https://office-desk-mockup.vercel.app is the static UI mockup only (fake data, no backend).
+> The live engine (FastAPI: Inbox -> summary + past files -> draft -> Approve) runs locally on the CPU of the office machine.
+> It cannot run on Vercel serverless (long-running Python, local models, persistent disk). See CORE.md to run it.
+
 An offline AI helper for the clerk's desk in a government, PSU, port, defence or district office.
 
 ## The problem
@@ -22,10 +26,10 @@ Excel register, sending email, handwriting, multiple users, approval chains, voi
 - Sits beside e-Office. The clerk copies files in and pastes the approved reply back. No integration needed.
 
 ## Status
-- **UI mockup only.** All data on screen is fake.
-- No backend yet: no real letter reading, search, drafting, Outbox or log.
+- Engine: Python/FastAPI app in `desk/` (run locally, see CORE.md).
+- Mockup: static UI with fake data.
 - Mockup: `mockup/index.html` (open it in any browser).
-- Live preview: https://office-desk-mockup.vercel.app
+- Mockup preview (UI only): https://office-desk-mockup.vercel.app
 
 ## Folder layout
 ```
@@ -34,3 +38,8 @@ research-context.md   self-contained brief for researching the product
 mockup/index.html     clickable UI mockup (single HTML file, fake data)
 docs/                 notes and design docs (empty for now)
 ```
+
+## Licence
+MIT (see LICENSE). Third-party components: THIRD_PARTY_NOTICES.md.
+
+`Dockerfile` and `fly.toml` are NOT used (Fly.io hosting was dropped); kept for reference only.

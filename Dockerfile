@@ -1,3 +1,4 @@
+# NOT USED: Fly.io hosting was dropped ($0 budget). Kept for reference only; the engine runs locally (see CORE.md).
 # Demo web app (Fly.io). Keys come from `fly secrets`, never from this image (.dockerignore drops .env).
 FROM python:3.11-slim
 WORKDIR /app

@@ -1,0 +1,8 @@
+# Only what the image needs. Never ship secrets, models or case data.
+*
+!requirements.txt
+!desk/
+!mockup/
+!data/index.db
+desk/__pycache__
+**/*.pyc

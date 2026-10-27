@@ -1,6 +1,6 @@
-# Core engine (CLI only)
+# Core engine + desk web app
 
-Index -> retrieve -> draft -> verify. No UI, Kruti Dev, OCR, Approve/Outbox, egress block or audit log yet.
+Index -> retrieve -> draft -> verify (frozen core, tag `core-frozen-mvp-ui`), plus one web desk: Inbox -> sources -> cited draft -> edit -> Approve -> Outbox + audit log. No Kruti Dev, OCR, Excel, email or e-Office API yet.
 
 ## Setup (once, needs internet only for the first model download)
 ```powershell
@@ -23,6 +23,40 @@ For the offline office box, copy `.cache/` along with the code and set `HF_HUB_O
 Output: readable summary on screen (top files with page + snippet, summary, each draft line with its source, page,
 quote and verified/FLAG status, then the filled template); full JSON with `--json`.
 
+## Demo web (local)
+```powershell
+$env:DESK_DEMO_PASSCODE = "pick-one"          # demo mode needs a passcode (process env or .env)
+.venv\Scripts\python -m desk web --port 8000   # open http://127.0.0.1:8000
+```
+One page (`mockup/index.html`) served by `desk/web.py` (FastAPI + uvicorn). Drop a letter -> the answer job runs in the
+background (status queued/running/done/error/approved; the page polls every 2 s) -> edit lines -> Approve -> `outbox/reply.txt`.
+Each draft line is `cited` (quote re-checked against the stored page text on every save and Approve), `clerk_fact`
+(needs the clerk's note) or `standard`. A cited line with FLAG / not verified / source not in the retrieved set blocks
+Approve unless an override reason is given (logged). Nothing is ever sent: Outbox = file download / copy to clipboard.
+Data per case in `DESK_DATA_DIR/cases/<id>/` (inbound letter, meta.json, drafts/v1..n.json, answer.json,
+archive_snapshot.json, outbox/reply.txt); append-only `DESK_DATA_DIR/audit.jsonl` (intake, answer_started, answer_done,
+draft_edited, verify, approve, override, outbox). Per-line applicability (`desk/applicability.py`): rule/section number in
+the letter vs the cited heading -> matches / against / not_assessed.
+
+## Demo vs Office
+| | demo | office |
+|---|---|---|
+| `DESK_MODE` | `demo` (default) | `office` |
+| Data | public samples only | the office archive |
+| Model | cloud (Groq) via `desk/llm.py`, capped at 3 calls / ~20k tokens per case | local only (LM Studio on localhost); refuses to start if the provider is groq/cerebras or any LLM URL is not localhost; sets `HF_HUB_OFFLINE=1` |
+| Access | passcode (`DESK_DEMO_PASSCODE`) -> HttpOnly cookie; yellow DEMO banner | no passcode (single PC) |
+
+## Deploy (Fly)
+Long-running app with one volume (not serverless). Needs a Fly account and `fly auth login` once.
+```powershell
+fly launch --no-deploy --copy-config            # app name in fly.toml: office-desk-agent-ng, region bom
+fly volumes create desk_data --size 3 --region bom
+fly secrets set GROQ_API_KEY=... DESK_DEMO_PASSCODE=...   # secrets only here, never in files or the image
+fly deploy
+```
+The image (`Dockerfile`, `.dockerignore` keeps `.env` out) carries the public-samples index as a seed; first boot copies it to
+`/data/index.db` and downloads the models (~1 GB) into `/data/cache` (health check grace 120 s; the page shows "engine warming up").
+
 ## How it works
 | Step | File | What |
 |---|---|---|
@@ -42,4 +76,4 @@ quote and verified/FLAG status, then the filled template); full JSON with `--jso
 pypdfium2 (Apache-2.0/BSD-3) · fastembed (Apache-2.0) · ONNX Runtime (MIT) · intfloat/multilingual-e5-small model (MIT) ·
 BAAI/bge-reranker-v2-m3 model (Apache-2.0; int8 ONNX export by onnx-community/bge-reranker-v2-m3-ONNX) · tokenizers (Apache-2.0) · huggingface_hub (Apache-2.0) ·
 sqlite-vec (Apache-2.0/MIT) · SQLite FTS5 (public domain) · RapidFuzz (MIT) · requests (Apache-2.0) · NumPy (BSD-3) ·
-pytest (MIT) · jsonschema (MIT). RRF: Cormack, Clarke & Büttcher, SIGIR 2009. Drafting LLM is an external API (Groq for development; Cerebras or LM Studio optional; LM Studio is proprietary, not bundled).
+pytest (MIT) · jsonschema (MIT) · FastAPI (MIT) · Starlette (BSD-3) · uvicorn (BSD-3) · python-multipart (Apache-2.0) · HTTPX (BSD-3). RRF: Cormack, Clarke & Büttcher, SIGIR 2009. Drafting LLM is an external API (Groq for development; Cerebras or LM Studio optional; LM Studio is proprietary, not bundled).

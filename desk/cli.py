@@ -86,10 +86,17 @@ def main(argv=None):
     for k in ("ref-no", "office", "to", "signatory", "reference", "date"):
         pa.add_argument(f"--{k}")
     sub.add_parser("models", help="list models the drafting API offers")
+    pw = sub.add_parser("web", help="desk web app (Inbox -> draft -> Approve -> Outbox) on http://HOST:PORT")
+    pw.add_argument("--host", default="127.0.0.1")
+    pw.add_argument("--port", type=int, default=8000)
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
+    if a.cmd == "web":
+        import uvicorn
+        uvicorn.run("desk.web:app", host=a.host, port=a.port)
+        return 0
     if a.cmd == "models":
         from . import llm
         print("\n".join(llm.list_models()))

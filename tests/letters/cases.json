@@ -9,5 +9,14 @@
                 {"list": "cases", "file": "cic_2014_omprakash_missing_file.pdf"}]},
   {"id": "C12", "letter": "c12_pension_pending_hi.txt", "lang": "hi",
    "note": "Hindi citizen letter, pension pending >1 yr with interest asked: cross-lingual hit on CCS (Pension) Rules 2021 in the rules list",
+   "expected": [{"list": "rules", "file": "ccs_pension_rules_2021_en.pdf"}]},
+  {"id": "C3", "letter": "c3_wrong_rti_exemption.txt", "lang": "en",
+   "note": "RTI refused under s.8(1)(j) wrongly: rules list has the RTI Act; draft must not uphold 8(1)(j) (applicability flag, not a recall check)",
+   "expected": [{"list": "rules", "file": "rti_act_2005_en.pdf"}]},
+  {"id": "C4", "letter": "c4_wrong_rule_cited.txt", "lang": "en",
+   "note": "Order cites the wrong provision (FR 56(j)): cases list has the Delhi HC Kalu Singh wrong-provision judgment",
+   "expected": [{"list": "cases", "file": "delhihc_2025_kalusingh_wrong_provision.txt"}]},
+  {"id": "C6", "letter": "c6_pension_14yr.txt", "lang": "en",
+   "note": "Pension after ~14 years of service: rules list has CCS (Pension) Rules 2021",
    "expected": [{"list": "rules", "file": "ccs_pension_rules_2021_en.pdf"}]}
 ]

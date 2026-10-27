@@ -109,22 +109,41 @@ body.log-open .drawer{transform:none}
 .x{border:var(--rule-hair);background:var(--color-surface);border-radius:var(--radius-sm);padding:var(--space-2xs) var(--space-sm)}
 @media (max-width:1100px){body{height:auto}.desk{grid-template-columns:minmax(0,1fr)}.pane+.pane{border-left:0;border-top:var(--rule-hair)}.top{flex-wrap:wrap}.paper{padding:var(--space-md)}}
 @media (prefers-reduced-motion:reduce){*{transition-duration:1ms!important}.drawer,.toast{transition:opacity 150ms linear!important}}
+.pill.warn{background:var(--color-bad-soft,#fde8e8);color:var(--color-bad,#a11)}
+.demobar{display:none;padding:var(--space-xs) var(--space-lg);background:#fff4d6;color:#5a4300;font-size:var(--text-sm);font-weight:600;border-bottom:var(--rule-hair)}
+.demobar.on{display:block}
+.ln{margin:0 0 var(--space-sm);padding:var(--space-2xs) var(--space-xs);border-radius:var(--radius-sm)}
+.ln.bad{background:var(--color-bad-soft,#fde8e8)}
+.ln p{margin:0 0 var(--space-2xs)}
+.lmeta{display:flex;flex-wrap:wrap;gap:var(--space-xs);align-items:center;font-family:var(--font-ui,inherit);font-size:var(--text-xs,12px)}
+.lmeta select,.inp{font:inherit;border:var(--rule-hair);border-radius:var(--radius-sm);padding:var(--space-2xs) var(--space-xs);background:var(--color-surface)}
+.lmeta .inp{flex:1;min-width:14em}
+.badge{border:var(--rule-hair);border-radius:999px;padding:0 var(--space-xs)}
+.badge.ok{color:#11632f;border-color:#11632f}
+.badge.bad{color:var(--color-bad,#a11);border-color:var(--color-bad,#a11)}
+.q{color:var(--color-muted);font-style:italic}
+.card.bad{border-color:var(--color-bad,#a11)}
+.tag.st-error{color:var(--color-bad,#a11)}
+.tag.st-approved{color:#11632f}
+#loginF .inp{display:block;margin:var(--space-sm) 0;width:100%;max-width:20em}
 </style>
 </head>
 <body>
 <header class="top">
   <h1>Office Desk Agent</h1>
-  <span class="pill">Offline · runs on this computer</span>
-  <span class="readout" aria-label="Local model status">CPU · 12 tok/s · RAM 3.1 GB</span>
+  <span class="pill" id="modePill">Loading…</span>
+  <span class="readout" id="readout" aria-label="Model status"></span>
 </header>
-<div class="banner" id="banner" role="alert"><span>Blocked: this computer is offline-only. Nothing left this PC. Logged for review.</span><button type="button" id="bannerClose">Dismiss</button></div>
+<div class="banner" id="banner" role="alert"><span id="bannerText"></span><button type="button" id="bannerClose">Dismiss</button></div>
+<div class="demobar" id="demoBar" role="note">DEMO — public sample files only; drafts use a cloud model (Groq). Do not upload real office letters. Office mode runs fully offline.</div>
 <main class="desk">
   <nav class="pane inbox" aria-label="Inbox">
     <h2>Inbox</h2>
-    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Drop a letter (PDF or text)">Drop a letter (PDF or text)</div>
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Drop a letter (PDF or text)">Drop a letter (PDF or text)<br><small>or click to choose</small></div>
+    <input type="file" id="file" accept=".pdf,.txt,text/plain,application/pdf" hidden>
     <ul class="letters" id="letters"></ul>
     <div class="nav">
-      <button type="button" id="outboxBtn">Outbox (<span id="outCount">2</span>)</button>
+      <button type="button" id="outboxBtn">Outbox (<span id="outCount">0</span>)</button>
       <button type="button" id="logBtn" aria-controls="drawer" aria-expanded="false">Action log</button>
     </div>
   </nav>
@@ -138,10 +157,12 @@ body.log-open .drawer{transform:none}
       </div>
     </div>
     <article class="paper" id="paper"></article>
-    <p class="hint">You can edit the draft directly. Hover a citation to see where each line came from.</p>
+    <p class="hint">You can edit the draft directly. Hover a citation to see its source. Lines must be cited (quote checked), a clerk fact (with your note) or standard text.</p>
     <div class="actions">
       <button type="button" class="btn primary" id="approve">Approve &amp; save to Outbox</button>
-      <button type="button" class="btn secondary" id="send">Send out…</button>
+      <button type="button" class="btn secondary" id="save" disabled>Save edits</button>
+      <button type="button" class="btn secondary" id="send" disabled>Copy reply</button>
+      <a class="btn secondary" id="dl" hidden download="reply.txt">Download reply</a>
     </div>
   </section>
 </main>
@@ -149,94 +170,185 @@ body.log-open .drawer{transform:none}
 <div class="scrim" id="scrim"></div>
 <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="logTitle" aria-hidden="true">
   <header><h2 id="logTitle">Action log</h2><button type="button" class="x" id="logClose">Close</button></header>
-  <p class="note">Read-only · for the officer in charge</p>
+  <p class="note" id="logNote">Read-only · for the officer in charge</p>
   <ol class="log" id="log"></ol>
 </aside>
 <script>
-const SIGN_EN='Section Officer (Administration)<br>Sagarpur Port Trust (sample office)';
-const SIGN_HI='अनुभाग अधिकारी (प्रशासन)<br>सागरपुर पत्तन न्यास (नमूना कार्यालय)';
-const D={
- pen:{
-  summary:['Retired senior clerk says her revised pension has not been paid for 5 months.','She has already submitted the revised pay certificate and bank details.','She asks for the date by which the revised pension and arrears will be paid.'],
-  sources:[
-   {id:'PEN/2024/118',t:'File PEN/2024/118 — similar pension delay, replied 12 Mar 2024',p:94,s:'Delay traced to service book pending verification at Accounts.\nReply gave expected date of revised PPO and arrears note.\nClosed after payment on 28 Mar 2024.'},
-   {id:'OO 14/2023',t:'Office Order 14/2023 — pension cases to be settled in 30 working days',p:88,s:'Para 3: letters to be registered within 3 days of receipt.\nPara 5: revision cases settled within 30 working days of complete papers.\nPara 7: pensioner to be told the expected date in writing.'},
-   {id:'Circ. 06/2025',t:'Pension Cell Circular 06/2025 — payment of arrears',p:79,s:'Arrears are credited with the first revised monthly payment.\nNo separate application is needed from the pensioner.\nBank to be informed through the Pension Cell only.'},
-   {id:'PEN/2025/031',t:'File PEN/2025/031 — service book sent for verification',p:72,s:'Service book forwarded to Accounts on 06 Oct 2026.\nVerification usually takes 3–4 weeks.\nRevised PPO to follow after verification.'}],
-  en:{ref:'SPA/ADM/PEN/2026/214',to:'Smt. Kamla Devi<br>Retired Senior Clerk<br>House No. 42, Sector 3, Sagarpur',sub:'Delay in revision of pension — your letter dated 15.10.2026',sal:'Madam,',
-   body:[['Your letter dated 15.10.2026 regarding delay in revision of your pension has been received and registered.','OO 14/2023'],['In a similar earlier case, the delay arose because the service records were pending verification.','PEN/2024/118'],['As per Office Order 14/2023, such cases are settled within 30 working days of receipt of complete papers.','OO 14/2023'],['Your service book has been sent for verification, and the revised pension order is expected by 30.11.2026.','PEN/2025/031'],['Arrears, if any, will be credited to your pension account with the first revised payment.','Circ. 06/2025']],close:'Yours faithfully,',sign:SIGN_EN},
-  hi:{ref:'SPA/ADM/PEN/2026/214',to:'श्रीमती कमला देवी<br>सेवानिवृत्त वरिष्ठ लिपिक<br>मकान सं. 42, सेक्टर 3, सागरपुर',sub:'पेंशन संशोधन में विलंब — आपका पत्र दिनांक 15.10.2026',sal:'महोदया,',
-   body:[['पेंशन संशोधन में विलंब से संबंधित आपका दिनांक 15.10.2026 का पत्र प्राप्त होकर दर्ज कर लिया गया है।','OO 14/2023'],['इसी प्रकार के एक पूर्व मामले में विलंब का कारण सेवा अभिलेखों का सत्यापन लंबित होना पाया गया था।','PEN/2024/118'],['कार्यालय आदेश 14/2023 के अनुसार ऐसे मामले पूर्ण दस्तावेज़ प्राप्त होने के 30 कार्य दिवसों में निपटाए जाते हैं।','OO 14/2023'],['आपकी सेवा पुस्तिका सत्यापन हेतु भेज दी गई है तथा संशोधित पेंशन आदेश 30.11.2026 तक अपेक्षित है।','PEN/2025/031'],['बकाया राशि, यदि कोई हो, पहले संशोधित भुगतान के साथ आपके पेंशन खाते में जमा की जाएगी।','Circ. 06/2025']],close:'भवदीय,',sign:SIGN_HI}},
- rti:{
-  summary:['Applicant asks for the rules for issuing gate passes to private vehicles.','He asks for a copy of the current gate pass procedure.','RTI fee paid by postal order; received 14 Oct 2026, reply due by 13 Nov 2026.'],
-  sources:[
-   {id:'RTI Act s.7(1)',t:'RTI Act 2005, Section 7(1) — reply within 30 days',p:96,s:'The CPIO shall, as expeditiously as possible,\nand in any case within thirty days of receipt of the request,\nprovide the information or reject it for stated reasons.'},
-   {id:'RTI/2025/042',t:'File RTI/2025/042 — same gate pass rules sought, replied 02 Jun 2025',p:90,s:'Applicant sought gate pass rules for private vehicles.\nCopy of SOP supplied on payment of copying charges.\nReply named the First Appellate Authority.'},
-   {id:'SOP 03/2024',t:'Gate Pass SOP 03/2024 — issue of passes to vehicles',p:84,s:'Para 2: passes issued by the Traffic Section only.\nPara 4: documents needed — RC, insurance, driver ID.\nPara 6: validity of 1 day, 1 month or 1 year.'},
-   {id:'RTI Rules r.4',t:'RTI Rules 2012, Rule 4 — copying charge ₹2 per page',p:68,s:'Fee for providing information in A4 size paper:\nrupees two for each page created or copied.\nPayable by postal order, demand draft or in cash.'}],
-  en:{ref:'SPA/RTI/2026/0193',to:'Shri Anil Prakash<br>17, Lake Road<br>Sagarpur',sub:'Information sought under the RTI Act, 2005 — your application dated 14.10.2026',sal:'Sir,',
-   body:[['Your application dated 14.10.2026 under the RTI Act, 2005 was received on the same date with the prescribed fee.','RTI Act s.7(1)'],['The rules for issue of gate passes to private vehicles are laid down in Gate Pass SOP 03/2024 (6 pages).','SOP 03/2024'],['The same information was supplied earlier to another applicant and is given here without change.','RTI/2025/042'],['A copy will be sent on deposit of copying charges of ₹12 (6 pages at ₹2 per page) by postal order.','RTI Rules r.4'],['If not satisfied, you may appeal to the First Appellate Authority, Sagarpur Port Trust, within 30 days.','RTI/2025/042']],close:'Yours faithfully,',sign:'Central Public Information Officer<br>Sagarpur Port Trust (sample office)'},
-  hi:{ref:'SPA/RTI/2026/0193',to:'श्री अनिल प्रकाश<br>17, लेक रोड<br>सागरपुर',sub:'सूचना का अधिकार अधिनियम, 2005 के अंतर्गत सूचना — आपका आवेदन दिनांक 14.10.2026',sal:'महोदय,',
-   body:[['सूचना का अधिकार अधिनियम, 2005 के अंतर्गत आपका आवेदन दिनांक 14.10.2026 निर्धारित शुल्क सहित उसी दिन प्राप्त हुआ।','RTI Act s.7(1)'],['निजी वाहनों को गेट पास जारी करने के नियम गेट पास एसओपी 03/2024 (6 पृष्ठ) में दिए गए हैं।','SOP 03/2024'],['यही सूचना पूर्व में एक अन्य आवेदक को दी गई थी और यहाँ बिना परिवर्तन के दी जा रही है।','RTI/2025/042'],['प्रतिलिपि शुल्क ₹12 (6 पृष्ठ, ₹2 प्रति पृष्ठ) पोस्टल ऑर्डर द्वारा जमा करने पर प्रति भेज दी जाएगी।','RTI Rules r.4'],['संतुष्ट न होने पर आप 30 दिनों के भीतर प्रथम अपील प्राधिकारी, सागरपुर पत्तन न्यास, को अपील कर सकते हैं।','RTI/2025/042']],close:'भवदीय,',sign:'केंद्रीय जन सूचना अधिकारी<br>सागरपुर पत्तन न्यास (नमूना कार्यालय)'}}
-};
-const LETTERS=[
- {key:'rti',from:'श्री अनिल प्रकाश',date:'14 Oct 2026',tag:'RTI',subj:'गेट पास नियमों की जानकारी हेतु आवेदन',hi:true},
- {key:'pen',from:'Smt. Kamla Devi (Retd.)',date:'15 Oct 2026',tag:'Pension',subj:'Revised pension not received for 5 months'},
- {key:'pen',from:'M/s Coastline Marine Stores',date:'16 Oct 2026',tag:'Complaint',subj:'Payment for bill no. CMS-77 delayed'},
- {key:'rti',from:'Harbourline Logistics',date:'17 Oct 2026',tag:'Query',subj:'Monthly gate pass for 3 trucks'}];
+/* Wired to /api/* (desk/web.py). One UI: Inbox -> sources -> cited draft -> edit -> Approve -> Outbox + log. */
 const $=s=>document.querySelector(s);
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let cur=1,lang='en',outbox=2,edited={},editLogged=false;
-const log=[['08:41','Approved — reply to RTI/2026/0187 saved to Outbox'],['08:44','Send-out blocked — e-mail attempt for RTI/2026/0187',1],['09:02','Letter received — Smt. Kamla Devi, pension query'],['09:02','Summary made (3 points)'],['09:03','4 sources found in office files'],['09:03','Draft created (English)'],['09:05','Letter received — Shri Anil Prakash, RTI (Hindi)'],['09:05','Summary made · 4 sources found · draft created']];
-const now=()=>new Date().toTimeString().slice(0,5);
-function addLog(t,bad){log.push([now(),t,bad?1:0]);renderLog()}
-function renderLog(){$('#log').innerHTML=log.map(([t,m,b])=>`<li><time>${t}</time><span class="${b?'bad':''}">${esc(m)}</span></li>`).join('')}
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let H={},LIST=[],cur=null,C=null,lang='en',timer=null,dirty=false,FAIL=[];
+const TYPES={cited:'Cited',clerk_fact:'Clerk fact',standard:'Standard text'};
+const EV={intake:'Letter received',answer_started:'Drafting started',answer_done:'Sources found + draft made',draft_edited:'Draft edited by clerk',verify:'Quote check re-run',approve:'Approved',override:'Approved with override',outbox:'Saved to Outbox (file only, not sent)'};
+async function api(path,opt={}){
+ const o={credentials:'same-origin',...opt};
+ if(o.json!==undefined){o.body=JSON.stringify(o.json);o.headers={'Content-Type':'application/json'};delete o.json}
+ const r=await fetch(path,o);const t=await r.text();let b=null;try{b=t?JSON.parse(t):null}catch(e){b=t}
+ if(r.status===401&&path!=='/api/login'){showLogin();throw new Error('login required')}
+ return {ok:r.ok,status:r.status,body:b};
+}
+let tt;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),3200)}
+function alertBar(m){$('#bannerText').textContent=m;$('#banner').classList.add('on')}
+function hhmm(ts){return ts?String(ts).slice(11,16):''}
+function day(ts){return ts?String(ts).slice(0,10):''}
+function showLogin(){
+ $('#mid').innerHTML=`<div class="card"><h3>Demo access</h3><form id="loginF"><p class="hint">Enter the demo passcode you were given.</p>
+ <input id="pc" type="password" autocomplete="current-password" aria-label="Demo passcode" class="inp">
+ <button class="btn primary" type="submit">Open desk</button><p class="hint" id="loginMsg"></p></form></div>`;
+ $('#loginF').addEventListener('submit',async e=>{e.preventDefault();const r=await api('/api/login',{method:'POST',json:{passcode:$('#pc').value}});
+  if(r.ok){$('#mid').innerHTML='';loadList()}else $('#loginMsg').textContent=(r.body&&r.body.error)||'Login failed'});
+ $('#pc').focus();
+}
+async function boot(){
+ H=(await api('/api/health')).body||{};
+ const demo=H.mode==='demo';
+ $('#modePill').textContent=demo?'Demo \u00b7 cloud stand-in, demo data only':'Office \u00b7 local model only';
+ $('#modePill').classList.toggle('warn',demo);
+ $('#readout').textContent=`${H.provider||''} \u00b7 ${H.model_id||''}${H.engine_ready?'':' \u00b7 engine warming up'}`;
+ $('#demoBar').classList.toggle('on',demo);
+ renderDraft();
+ try{await loadList()}catch(e){}
+}
+async function loadList(){
+ const r=await api('/api/cases');LIST=r.body||[];renderInbox();
+ if(!cur&&LIST.length)select(LIST[0].case_id);else if(!LIST.length&&!cur)$('#mid').innerHTML='<div class="card"><h3>No letters yet</h3><p>Drop a letter (PDF or text) into the Inbox on the left. Pick the reply language first (top right).</p></div>';
+}
 function renderInbox(){
- $('#letters').innerHTML=LETTERS.map((l,i)=>`<li><button type="button" class="letter" data-i="${i}" aria-current="${i===cur}"><span class="meta"><b>${esc(l.from)}</b></span><span class="subj"${l.hi?' lang="hi"':''}>${esc(l.subj)}</span><span class="meta"><span>${l.date}</span><span class="tag">${l.tag}</span></span></button></li>`).join('');
+ $('#letters').innerHTML=LIST.map(l=>`<li><button type="button" class="letter" data-id="${l.case_id}" aria-current="${l.case_id===cur}"><span class="meta"><b>${esc(l.filename)}</b></span><span class="meta"><span>${day(l.created_ts)} ${hhmm(l.created_ts)}</span><span class="tag st-${l.status}">${esc(l.status)}</span></span></button></li>`).join('');
+ $('#outCount').textContent=LIST.filter(l=>l.status==='approved').length;
+}
+function select(id){cur=id;dirty=false;FAIL=[];renderInbox();loadCase()}
+async function loadCase(){
+ clearTimeout(timer);if(!cur)return;
+ const id=cur,r=await api(`/api/cases/${id}`);if(id!==cur)return;
+ if(!r.ok){alertBar((r.body&&r.body.error)||'Could not load case');return}
+ const prev=C&&C.case_id===id?C.status:null;C=r.body;
+ if(!dirty)renderDraft();renderMid();
+ if(['queued','running'].includes(C.status))timer=setTimeout(loadCase,2000);
+ if(prev!==C.status){const l=LIST.find(x=>x.case_id===id);if(l){l.status=C.status;renderInbox()}}
+}
+function srcList(arr,kind){
+ if(!arr||!arr.length)return `<li class="src"><span class="t">(no ${kind} found)</span></li>`;
+ return arr.map((s,i)=>`<li class="src" data-id="${esc(s.file)}"><div class="row"><span class="t">${esc(s.file)} \u00b7 p.${esc(s.page)}${s.heading?' \u2014 '+esc(s.heading):''}</span><button type="button" class="link" aria-expanded="false" aria-controls="sn${kind}${i}">View</button></div><p class="snip" id="sn${kind}${i}" hidden>${esc(s.snippet)}</p></li>`).join('');
 }
 function renderMid(){
- const l=LETTERS[cur],d=D[l.key];
- $('#mid').innerHTML=`<div class="lhead"><div class="meta"><span>From: <b>${esc(l.from)}</b></span><span>Received: ${l.date}</span><span class="tag">${l.tag}</span></div><h2${l.hi?' lang="hi"':''}>${esc(l.subj)}</h2></div>
- <div class="card"><h3>Summary</h3><ul>${d.summary.map(s=>`<li>${esc(s)}</li>`).join('')}</ul></div>
- <div class="card"><h3>Closest past files &amp; rules</h3><ul class="srcs">${d.sources.map((s,i)=>`<li class="src" data-id="${esc(s.id)}"><div class="row"><span class="t">${esc(s.t)}</span><span class="pct" title="Match">${s.p}%</span><button type="button" class="link" aria-expanded="false" aria-controls="sn${i}">View</button></div><p class="snip" id="sn${i}" hidden>${esc(s.s)}</p></li>`).join('')}</ul></div>`;
+ if(!C)return;
+ const busy=['queued','running'].includes(C.status);
+ let h=`<div class="lhead"><div class="meta"><span>File: <b>${esc(C.filename)}</b></span><span>Received: ${day(C.created_ts)} ${hhmm(C.created_ts)}</span><span class="tag st-${C.status}">${esc(C.status)}</span><span class="tag">${C.fields.lang==='hi'?'Hindi reply':'English reply'}</span></div><h2>${esc(C.subject||C.filename)}</h2><p class="readout">case ${esc(C.case_id.slice(0,8))} \u00b7 sha256 ${esc((C.sha256||'').slice(0,12))}\u2026</p></div>`;
+ if(busy)h+=`<div class="card"><h3>Working\u2026</h3><p>Finding past files and rules, then drafting with checked quotes. This page refreshes every 2 seconds.</p></div>`;
+ if(C.status==='error')h+=`<div class="card bad"><h3>Could not finish</h3><p>${esc(C.error)}</p><button type="button" class="btn secondary" id="retry">Try again</button></div>`;
+ if(C.summary)h+=`<div class="card"><h3>Summary</h3><p>${esc(C.summary)}</p></div>`;
+ if(C.no_matching_record)h+=`<div class="card bad"><h3>No matching record</h3><p>Nothing in the office files matched this letter. Do not reply "file missing".</p><ul><li>Search the inward/movement register by file number and date.</li><li>Ask the Record Room; note who searched, where and when.</li><li>Then add clerk-fact or standard lines in the draft and Approve.</li></ul></div>`;
+ if(C.sources)h+=`<div class="card"><h3>Rules that apply</h3><ul class="srcs">${srcList(C.sources.rules,'rules')}</ul></div><div class="card"><h3>Closest past files</h3><ul class="srcs">${srcList(C.sources.cases,'cases')}</ul></div>`;
+ h+=`<div class="card"><h3>Incoming letter</h3><p class="snip">${esc(C.letter_text)}</p></div>`;
+ $('#mid').innerHTML=h;
+ const rt=$('#retry');if(rt)rt.addEventListener('click',startAnswer);
+}
+function lineHTML(ln,i){
+ const f=FAIL.find(x=>x.index===i),v=ln.verify||{},ok=ln.line_type!=='cited'||v.verified;
+ let m=`<select data-i="${i}" data-k="line_type" aria-label="Line type">${Object.entries(TYPES).map(([k,t])=>`<option value="${k}"${ln.line_type===k?' selected':''}>${t}</option>`).join('')}</select>`;
+ if(ln.line_type==='cited'){
+  m+=`<span class="chip" tabindex="0" data-src="${esc(ln.source_file)}" title="${esc(ln.verbatim_quote)}">${esc(ln.source_file||'no source')} p.${esc(ln.page)}</span>`;
+  m+=`<span class="badge ${v.verified?'ok':'bad'}" title="Quote found in the cited file?">quote: ${esc(v.status||'not checked')}</span>`;
+  m+=`<span class="badge ${ln.applicability==='against'?'bad':''}" title="Rule number in the letter vs the cited heading">rule: ${esc(ln.applicability||'not_assessed')}</span>`;
+  if(v.page_note)m+=`<span class="badge bad">${esc(v.page_note)}</span>`;
+  if(ln.verbatim_quote)m+=`<span class="q">\u201c${esc(ln.verbatim_quote)}\u201d</span>`;
+ }else if(ln.line_type==='clerk_fact'){
+  m+=`<input class="inp" data-i="${i}" data-k="clerk_note" value="${esc(ln.clerk_note)}" placeholder="Clerk's reason / where this fact comes from (required)" aria-label="Clerk note">`;
+ }
+ m+=`<button type="button" class="link" data-del="${i}">Remove</button>`;
+ return `<div class="ln${(f||!ok)?' bad':''}" data-i="${i}"><p contenteditable="true" spellcheck="false" data-i="${i}" data-k="sentence" aria-label="Draft line ${i+1}">${esc(ln.sentence)}</p><div class="lmeta">${m}</div></div>`;
 }
 function renderDraft(){
- const k=cur+lang,d=D[LETTERS[cur].key][lang];
  document.querySelectorAll('.seg button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.lang===lang));
- const p=$('#paper');p.lang=lang;
- p.innerHTML=edited[k]||`<div contenteditable="true" spellcheck="false" aria-label="Draft reply, editable">
- <p class="ref"><span>${lang==='hi'?'पत्र सं.':'Ref. No.'} ${d.ref}</span><span>${lang==='hi'?'दिनांक':'Date'}: 20.10.2026</span></p>
- <p>${lang==='hi'?'सेवा में,':'To,'}<br>${d.to}</p>
- <p><b>${lang==='hi'?'विषय':'Subject'}: ${d.sub}</b></p><p>${d.sal}</p>
- <div class="body">${d.body.map(([t,c])=>`<p>${t}<span class="chip" contenteditable="false" tabindex="0" data-src="${c}">[${c}]</span></p>`).join('')}</div>
- <div class="sign">${d.close}<br><br>(signature)<br>${d.sign}</div></div>`;
- editLogged=!!edited[k];
+ const p=$('#paper');
+ if(!C||!C.draft){p.innerHTML=`<p class="hint">${C&&['queued','running'].includes(C.status)?'Draft is being made\u2026':'No draft yet.'}</p>`;setButtons();return}
+ const F=C.fields,hi=F.lang==='hi';p.lang=F.lang;
+ p.innerHTML=`<p class="ref"><span>${hi?'\u092a\u0924\u094d\u0930 \u0938\u0902.':'Ref. No.'} ${esc(F.ref_no)}</span><span>${esc(F.office)}</span></p>
+ <p>${hi?'\u0938\u0947\u0935\u093e \u092e\u0947\u0902,':'To,'}<br>${esc(F.to)}</p><p><b>${hi?'\u0935\u093f\u0937\u092f':'Subject'}: ${esc(F.subject!=='____'?F.subject:(C.subject||'____'))}</b></p>
+ <div class="body">${C.draft.lines.map(lineHTML).join('')||'<p class="hint">No lines. Add a standard or clerk-fact line.</p>'}</div>
+ <p><button type="button" class="link" id="addLine">+ Add line</button> <span class="readout">draft v${C.draft.version}${dirty?' \u00b7 unsaved changes':''}</span></p>
+ <div class="sign">${esc(F.signatory)}</div>
+ <div id="failBox"></div>`;
+ renderFail();setButtons();
 }
-function select(i){cur=i;renderInbox();renderMid();renderDraft()}
-function hl(id,on){document.querySelectorAll('.src').forEach(s=>s.classList.toggle('hl',on&&s.dataset.id===id))}
-let tt;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),2600)}
-function openLog(o){document.body.classList.toggle('log-open',o);$('#drawer').setAttribute('aria-hidden',!o);$('#logBtn').setAttribute('aria-expanded',o);(o?$('#logClose'):$('#logBtn')).focus()}
-$('#letters').addEventListener('click',e=>{const b=e.target.closest('.letter');if(b)select(+b.dataset.i)});
-$('#mid').addEventListener('click',e=>{const b=e.target.closest('.link');if(!b)return;const sn=document.getElementById(b.getAttribute('aria-controls')),o=sn.hidden;sn.hidden=!o;b.setAttribute('aria-expanded',o);b.textContent=o?'Hide':'View'});
+function renderFail(){
+ const b=$('#failBox');if(!b)return;
+ if(!FAIL.length){b.innerHTML='';return}
+ b.innerHTML=`<div class="card bad"><h3>Approve blocked</h3><ul>${FAIL.map(f=>`<li>Line ${f.index+1}: ${esc(f.status)} <button type="button" class="link" data-cf="${f.index}">Mark as clerk fact</button></li>`).join('')}</ul>
+ <p class="hint">Fix the quote, mark the line as a clerk fact (with your reason), or approve with a logged override.</p>
+ <input class="inp" id="ovr" placeholder="Override reason (goes into the officer's log)" aria-label="Override reason"> <button type="button" class="btn secondary" id="ovrBtn">Approve with override</button></div>`;
+}
+function setButtons(){
+ const done=C&&C.status==='done',appr=C&&C.status==='approved';
+ $('#approve').disabled=!done;$('#save').disabled=!done||!dirty;
+ $('#send').disabled=!appr;$('#dl').hidden=!appr;if(appr)$('#dl').href=`/api/cases/${C.case_id}/outbox`;
+}
+function edit(i,k,v){C.draft.lines[i][k]=v;if(!dirty){dirty=true;setButtons()}}
 const paper=$('#paper');
+paper.addEventListener('input',e=>{const t=e.target,i=+t.dataset.i;if(!t.dataset.k||!C)return;edit(i,t.dataset.k,t.dataset.k==='sentence'?t.innerText.trim():t.value)});
+paper.addEventListener('change',e=>{const t=e.target;if(t.dataset.k==='line_type'){edit(+t.dataset.i,'line_type',t.value);renderDraft();if(t.value==='clerk_fact'){const n=paper.querySelector(`input[data-i="${t.dataset.i}"]`);if(n)n.focus()}}});
+paper.addEventListener('click',e=>{
+ const t=e.target;
+ if(t.id==='addLine'){C.draft.lines.push({sentence:'(type the line)',line_type:'standard'});dirty=true;renderDraft();return}
+ if(t.dataset.del!==undefined){C.draft.lines.splice(+t.dataset.del,1);dirty=true;FAIL=[];renderDraft();return}
+ if(t.dataset.cf!==undefined){const i=+t.dataset.cf;edit(i,'line_type','clerk_fact');FAIL=FAIL.filter(f=>f.index!==i);renderDraft();const n=paper.querySelector(`input[data-i="${i}"]`);if(n)n.focus();return}
+ if(t.id==='ovrBtn'){const r=$('#ovr').value.trim();if(!r){toast('Type an override reason first');return}doApprove(r)}
+});
+function hl(id,on){document.querySelectorAll('.src').forEach(s=>s.classList.toggle('hl',on&&s.dataset.id===id))}
 paper.addEventListener('mouseover',e=>{const c=e.target.closest('.chip');if(c)hl(c.dataset.src,true)});
 paper.addEventListener('mouseout',e=>{if(e.target.closest('.chip'))hl(null,false)});
-paper.addEventListener('focusin',e=>{const c=e.target.closest('.chip');hl(c&&c.dataset.src,!!c)});
-paper.addEventListener('input',()=>{edited[cur+lang]=paper.innerHTML;if(!editLogged){editLogged=true;addLog(`Draft edited by clerk — ${LETTERS[cur].from}`)}});
-document.querySelector('.seg').addEventListener('click',e=>{const b=e.target.closest('button');if(b&&b.dataset.lang!==lang){lang=b.dataset.lang;renderDraft()}});
-$('#approve').addEventListener('click',()=>{outbox++;$('#outCount').textContent=outbox;toast('Saved to Outbox');addLog(`Approved — reply to ${LETTERS[cur].from} saved to Outbox (${lang==='hi'?'Hindi':'English'})`)});
-$('#send').addEventListener('click',()=>{$('#banner').classList.add('on');addLog(`Send-out blocked — reply to ${LETTERS[cur].from}`,true)});
+async function save(){
+ const lines=C.draft.lines.map(l=>({sentence:l.sentence,source_file:l.source_file??null,page:l.page??null,verbatim_quote:l.verbatim_quote??null,line_type:l.line_type,clerk_note:l.clerk_note??null}));
+ const r=await api(`/api/cases/${C.case_id}/draft`,{method:'PATCH',json:{lines}});
+ if(!r.ok){toast((r.body&&r.body.error)||'Save failed');return false}
+ C.draft={version:r.body.version,lines:r.body.lines};dirty=false;renderDraft();toast(`Draft saved (v${r.body.version}) \u2014 quotes re-checked`);return true;
+}
+async function doApprove(reason){
+ if(dirty&&!(await save()))return;
+ const r=await api(`/api/cases/${C.case_id}/approve`,{method:'POST',json:reason?{override_reason:reason}:{}});
+ if(r.status===409){FAIL=r.body.failing_lines||[];if(!FAIL.length)toast(r.body.error);renderDraft();return}
+ if(!r.ok){toast((r.body&&r.body.error)||'Approve failed');return}
+ FAIL=[];C._text=r.body.text;toast(r.body.override?'Approved with logged override \u2014 saved to Outbox':'Approved \u2014 saved to Outbox');
+ await loadCase();await loadList();
+}
+async function startAnswer(){const r=await api(`/api/cases/${cur}/answer`,{method:'POST'});if(!r.ok)toast((r.body&&r.body.error)||'Could not start');loadCase()}
+async function upload(f){
+ if(!f)return;const fd=new FormData();fd.append('file',f);fd.append('lang',lang);
+ toast('Letter received \u2014 reading\u2026');
+ const r=await api('/api/cases',{method:'POST',body:fd});
+ if(!r.ok){toast((r.body&&r.body.error)||'Upload failed');return}
+ cur=r.body.case_id;await api(`/api/cases/${cur}/answer`,{method:'POST'});await loadList();select(cur);
+}
+$('#letters').addEventListener('click',e=>{const b=e.target.closest('.letter');if(b)select(b.dataset.id)});
+$('#mid').addEventListener('click',e=>{const b=e.target.closest('.link');if(!b||!b.getAttribute('aria-controls'))return;const sn=document.getElementById(b.getAttribute('aria-controls')),o=sn.hidden;sn.hidden=!o;b.setAttribute('aria-expanded',o);b.textContent=o?'Hide':'View'});
+document.querySelector('.seg').addEventListener('click',e=>{const b=e.target.closest('button');if(b){lang=b.dataset.lang;renderDraft();toast(lang==='hi'?'New letters will get a Hindi reply':'New letters will get an English reply')}});
+$('#approve').addEventListener('click',()=>doApprove(''));
+$('#save').addEventListener('click',save);
+$('#send').addEventListener('click',async()=>{const r=await fetch(`/api/cases/${C.case_id}/outbox`,{credentials:'same-origin'});const t=await r.text();try{await navigator.clipboard.writeText(t);toast('Reply copied \u2014 paste it into e-Office')}catch(e){toast('Copy blocked by the browser; use Download')}});
 $('#bannerClose').addEventListener('click',()=>$('#banner').classList.remove('on'));
-$('#outboxBtn').addEventListener('click',()=>toast(`Outbox has ${outbox} approved replies (mockup)`));
+$('#outboxBtn').addEventListener('click',()=>{const a=LIST.filter(l=>l.status==='approved');toast(`Outbox has ${a.length} approved repl${a.length===1?'y':'ies'} (files only \u2014 nothing is sent)`)});
+async function openLog(o){
+ document.body.classList.toggle('log-open',o);$('#drawer').setAttribute('aria-hidden',!o);$('#logBtn').setAttribute('aria-expanded',o);
+ if(o){const r=await api('/api/log'+(cur?`?case_id=${cur}`:''));const ev=r.body||[];
+  $('#logNote').textContent=`Read-only \u00b7 for the officer in charge${cur?' \u00b7 case '+cur.slice(0,8):''}`;
+  $('#log').innerHTML=ev.map(e=>{const bad=e.event_type==='override'||(e.event_type==='answer_done'&&e.ok===false);
+   const x=e.event_type==='override'?` \u2014 reason: ${e.reason}`:e.event_type==='answer_done'?(e.ok?` \u2014 ${(e.retrieved_files||[]).length} files, ${e.lines} lines, ${e.model||''} (${e.mode})`:` \u2014 ${e.error}`):e.event_type==='verify'?` \u2014 ${e.failing} failing of ${e.cited} cited (v${e.draft_version})`:e.event_type==='intake'?` \u2014 ${e.filename}`:e.draft_version?` (v${e.draft_version})`:'';
+   return `<li><time>${hhmm(e.ts_iso)}</time><span class="${bad?'bad':''}">${esc((EV[e.event_type]||e.event_type)+x)}</span></li>`}).join('')||'<li><span>No events yet</span></li>';
+  $('#logClose').focus()} else $('#logBtn').focus();
+}
 $('#logBtn').addEventListener('click',()=>openLog(true));
 $('#logClose').addEventListener('click',()=>openLog(false));
 $('#scrim').addEventListener('click',()=>openLog(false));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('log-open'))openLog(false)});
-const drop=$('#drop');
+const drop=$('#drop'),fi=$('#file');
 ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over')}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
-drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];addLog(`Letter received — ${f?f.name:'dropped file'} (mockup: not read)`);toast('Letter added (mockup only)')});
-renderLog();select(1);
+drop.addEventListener('drop',e=>upload(e.dataTransfer.files[0]));
+drop.addEventListener('click',()=>fi.click());
+drop.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fi.click()}});
+fi.addEventListener('change',()=>{upload(fi.files[0]);fi.value=''});
+boot();
 </script>
 </body>
 </html>
